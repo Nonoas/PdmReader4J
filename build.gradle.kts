@@ -20,7 +20,7 @@ plugins {
     id("io.github.fvarrui.javapackager.plugin") version "1.7.5"
 }
 
-group = "com.example"
+group = "indi.nonoas"
 version = "0.1.0-SNAPSHOT"
 
 repositories {

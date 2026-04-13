@@ -145,7 +145,7 @@ Recommended JavaFX controls:
 ## Suggested Package Structure
 
 ```text
-com.example.pdmreader
+indi.nonoas.pdmreader
   ├─ app
   ├─ ui
   ├─ controller
