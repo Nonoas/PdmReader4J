@@ -1,10 +1,23 @@
+import io.github.fvarrui.javapackager.gradle.PackageTask
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+val myMainClass: String by project
+
+buildscript {
+    repositories {
+        mavenCentral()
+        maven("https://central.sonatype.com/repository/maven-snapshots/")
+    }
+    dependencies {
+        classpath("io.github.fvarrui:javapackager:1.7.5")
+    }
+}
 
 plugins {
     kotlin("jvm") version "2.1.0"
     application
     id("org.openjfx.javafxplugin") version "0.1.0"
+    id("io.github.fvarrui.javapackager.plugin") version "1.7.5"
 }
 
 group = "com.example"
@@ -38,7 +51,7 @@ dependencies {
 }
 
 application {
-    mainClass.set("com.example.pdmreader.app.PdmReaderLauncher")
+    mainClass.set(myMainClass)
 }
 
 tasks.withType<KotlinJvmCompile>().configureEach {
@@ -49,4 +62,39 @@ tasks.withType<KotlinJvmCompile>().configureEach {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+// 添加 packageMyApp 任务用于打包应用程序
+tasks.register<PackageTask>("packageMyApp") {
+    dependsOn(tasks.named("assemble"))
+
+    vmArgs = listOf(
+        "-Djavafx.enablePreview=true",
+        "--add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED"
+    )
+
+    mainClass = myMainClass
+
+    // Java 模块配置
+    modules = listOf(
+        "java.base",
+        "java.management",
+        "java.net.http",
+        "java.scripting",
+        "java.sql",
+        "java.naming",
+        "jdk.jsobject",
+        "jdk.unsupported",
+        "jdk.unsupported.desktop",
+        "jdk.xml.dom",
+        "jdk.crypto.ec"
+    )
+
+    isBundleJre = true
+    isGenerateInstaller = false
+    isAdministratorRequired = false
+
+    winConfig.apply {
+        isCreateZipball = true
+    }
 }

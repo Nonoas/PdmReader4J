@@ -1,5 +1,6 @@
-package com.example.pdmreader.app
+package com.example.pdmreader
 
+import com.example.pdmreader.app.PdmReaderApplication
 import javafx.application.Application
 
 object PdmReaderLauncher {
