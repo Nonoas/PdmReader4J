@@ -1,0 +1,106 @@
+.root {
+    -fx-font-family: "Microsoft YaHei UI";
+    -fx-background-color: linear-gradient(to bottom right, #f4f1e8, #dce9ea);
+    -fx-text-fill: #1f2a37;
+}
+
+.top-toolbar {
+    -fx-background-color: linear-gradient(to right, #143642, #1f5c67);
+    -fx-padding: 14 18 14 18;
+}
+
+.top-toolbar .label,
+.top-toolbar .button,
+.top-toolbar .text-field {
+    -fx-font-size: 13px;
+}
+
+.button {
+    -fx-background-color: #e7efe9;
+    -fx-text-fill: #16333b;
+    -fx-background-radius: 10;
+    -fx-padding: 8 14 8 14;
+    -fx-font-weight: 600;
+}
+
+.button:hover {
+    -fx-background-color: #d9e9de;
+}
+
+.primary-button {
+    -fx-background-color: #f5c156;
+    -fx-text-fill: #2d2107;
+}
+
+.primary-button:hover {
+    -fx-background-color: #efb443;
+}
+
+.text-field,
+.text-area,
+.list-view,
+.table-view {
+    -fx-background-radius: 12;
+    -fx-border-radius: 12;
+    -fx-border-color: #b7c8ca;
+    -fx-background-color: rgba(255, 255, 255, 0.92);
+}
+
+.app-heading {
+    -fx-font-size: 30px;
+    -fx-font-weight: 800;
+    -fx-text-fill: #143642;
+}
+
+.section-title {
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #19444c;
+}
+
+.detail-header {
+    -fx-background-color: rgba(255, 255, 255, 0.66);
+}
+
+.table-title {
+    -fx-font-size: 22px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #19363b;
+}
+
+.table-meta,
+.table-comment,
+.status-label {
+    -fx-font-size: 13px;
+    -fx-text-fill: #486166;
+}
+
+.status-label {
+    -fx-padding: 12 18 14 18;
+    -fx-background-color: rgba(20, 54, 66, 0.08);
+}
+
+.multi-line-cell {
+    -fx-padding: 10 12 10 12;
+    -fx-cell-size: 40px;
+}
+
+.list-cell:filled:selected,
+.table-row-cell:selected {
+    -fx-background-color: #1f5c67;
+    -fx-text-fill: white;
+}
+
+.table-view .column-header-background {
+    -fx-background-color: linear-gradient(to right, #d8e7e4, #ecf4f1);
+}
+
+.table-view .column-header {
+    -fx-font-weight: 700;
+}
+
+.ddl-area {
+    -fx-font-family: "Consolas";
+    -fx-highlight-fill: #1f5c67;
+    -fx-highlight-text-fill: white;
+}

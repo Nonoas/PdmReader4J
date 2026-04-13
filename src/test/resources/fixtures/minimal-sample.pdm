@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?PowerDesigner AppLocale="UTF16" Target="ORACLE Version 11g" signature="PDM_DATA_MODEL_XML" version="16.7.4.6866"?>
+<Model xmlns:a="attribute" xmlns:c="collection" xmlns:o="object">
+    <o:RootObject Id="o1">
+        <c:Children>
+            <o:Model Id="o2">
+                <a:Name>SampleModel</a:Name>
+                <a:Code>SampleModel</a:Code>
+                <c:Tables>
+                    <o:Table Id="o10">
+                        <a:Name>示例表</a:Name>
+                        <a:Code>SAMPLE_TABLE</a:Code>
+                        <a:Comment>示例表备注</a:Comment>
+                        <c:Columns>
+                            <o:Column Id="o11">
+                                <a:Name>主键</a:Name>
+                                <a:Code>ID</a:Code>
+                                <a:Comment>主键</a:Comment>
+                                <a:DataType>NUMBER(18,0)</a:DataType>
+                                <a:Length>18</a:Length>
+                                <a:Column.Mandatory>1</a:Column.Mandatory>
+                            </o:Column>
+                            <o:Column Id="o12">
+                                <a:Name>名称</a:Name>
+                                <a:Code>NAME</a:Code>
+                                <a:Comment>名称</a:Comment>
+                                <a:DataType>VARCHAR2(64)</a:DataType>
+                                <a:Length>64</a:Length>
+                                <a:DefaultValue>'UNKNOWN'</a:DefaultValue>
+                            </o:Column>
+                        </c:Columns>
+                        <c:Keys>
+                            <o:Key Id="o13">
+                                <c:Key.Columns>
+                                    <o:Column Ref="o11"/>
+                                </c:Key.Columns>
+                            </o:Key>
+                        </c:Keys>
+                        <c:PrimaryKey>
+                            <o:Key Ref="o13"/>
+                        </c:PrimaryKey>
+                    </o:Table>
+                </c:Tables>
+            </o:Model>
+        </c:Children>
+    </o:RootObject>
+</Model>
