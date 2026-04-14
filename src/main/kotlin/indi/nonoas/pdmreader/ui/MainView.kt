@@ -1,14 +1,17 @@
 package indi.nonoas.pdmreader.ui
 
+import github.nonoas.jfx.flat.ui.AppState
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.model.NavigationItemType
 import indi.nonoas.pdmreader.model.PdmColumnDetail
 import indi.nonoas.pdmreader.model.PdmImportSummary
 import indi.nonoas.pdmreader.model.TableNavigationItem
+import javafx.application.Platform
 import javafx.beans.property.ReadOnlyObjectProperty
 import javafx.beans.property.SimpleStringProperty
 import javafx.geometry.Insets
 import javafx.geometry.Orientation
+import javafx.geometry.Pos
 import javafx.scene.control.*
 import javafx.scene.layout.BorderPane
 import javafx.scene.layout.HBox
@@ -16,12 +19,25 @@ import javafx.scene.layout.Priority
 import javafx.scene.layout.VBox
 import javafx.stage.FileChooser
 import javafx.util.Callback
+import org.json.JSONObject
+import org.slf4j.LoggerFactory
+import java.awt.Desktop
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URL
 import java.nio.file.Path
 
 class MainView(
     private val controller: MainController,
 ) {
+    private val logger = LoggerFactory.getLogger(MainView::class.java)
+
+    companion object {
+        const val APP_VERSION = "0.0.1"
+        const val GITHUB_REPO = "Nonoas/PdmReader4J"
+    }
+
     fun createContent(): BorderPane {
         val searchField = TextField().apply {
             promptText = "搜索表名、表编码、字段名或字段编码"
@@ -70,6 +86,11 @@ class MainView(
             }
         }
 
+        val aboutButton = Button("关于").apply {
+            setOnAction {
+                showAboutDialog()
+            }
+        }
         val toolbar = ToolBar(
             importButton,
             removeImportButton,
@@ -77,6 +98,7 @@ class MainView(
             copyDdlButton,
             searchField,
             clearSearchButton,
+            aboutButton,
         ).apply {
             styleClass.add("top-toolbar")
         }
@@ -164,7 +186,7 @@ class MainView(
     }
 
     private fun createImportListView(): ListView<PdmImportSummary> =
-        ListView<PdmImportSummary>(controller.imports).apply {
+        ListView(controller.imports).apply {
             selectionModel.selectionMode = SelectionMode.SINGLE
             placeholder = Label("尚未导入任何 PDM 文件")
             cellFactory = Callback {
@@ -208,7 +230,8 @@ class MainView(
 
                             else -> {
                                 val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
-                                val columnCode = item.matchedColumnCode?.takeIf { it.isNotBlank() } ?: item.matchedColumnName
+                                val columnCode =
+                                    item.matchedColumnCode?.takeIf { it.isNotBlank() } ?: item.matchedColumnName
                                 "[列] $tableCode > ${columnCode.orEmpty()}-${item.tableName} · ${item.importFileName}"
                             }
                         }
@@ -259,7 +282,10 @@ class MainView(
         return table
     }
 
-    private fun textColumn(title: String, valueProvider: (PdmColumnDetail) -> String): TableColumn<PdmColumnDetail, String> =
+    private fun textColumn(
+        title: String,
+        valueProvider: (PdmColumnDetail) -> String
+    ): TableColumn<PdmColumnDetail, String> =
         TableColumn<PdmColumnDetail, String>(title).apply {
             setCellValueFactory { cell ->
                 SimpleStringProperty(valueProvider(cell.value))
@@ -284,11 +310,11 @@ class MainView(
         }.showOpenMultipleDialog(null).orEmpty()
 
     private fun confirmRemoveImport(importSummary: PdmImportSummary): Boolean =
-        Alert(Alert.AlertType.CONFIRMATION).apply {
-            title = "确认移除"
-            headerText = "确认移除已导入的 PDM 吗？"
-            contentText = "${importSummary.modelName}\n${importSummary.fileName}"
-        }.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK
+        DialogWithIcon.confirm(
+            "确认移除",
+            "确认移除已导入的 PDM 吗？\n${importSummary.modelName}\n${importSummary.fileName}"
+        )
+
 
     private fun defaultInitialDirectory(): File {
         val sampleDirectory = Path.of(
@@ -309,11 +335,319 @@ class MainView(
     }
 
     private fun showError(exception: Throwable) {
-        Alert(Alert.AlertType.ERROR).apply {
-            title = "执行失败"
-            headerText = exception.message ?: "未知错误"
-            contentText = exception.stackTraceToString()
-            isResizable = true
+        logger.error(exception.message, exception)
+        DialogWithIcon.error("执行失败", exception.message ?: "未知错误")
+    }
+
+    // ==================== 关于 & 更新 ====================
+
+    private fun showAboutDialog() {
+        val repoUrl = "https://github.com/$GITHUB_REPO"
+        Alert(Alert.AlertType.INFORMATION).apply {
+            title = "关于 PdmReader4J"
+            headerText = "PdmReader4J - PowerDesigner PDM 文件阅读器"
+            initOwner(AppState.getStage())
+            dialogPane.content = VBox(14.0).apply {
+                padding = Insets(20.0)
+                prefWidth = 380.0
+
+                children.addAll(
+                    Label("版本: $APP_VERSION"),
+                    Label("作者: Nonoas"),
+                    HBox(
+                        Label("GitHub:"),
+                        Hyperlink(repoUrl).apply {
+                            setOnAction {
+                                Desktop.getDesktop().browse(URI(repoUrl))
+                            }
+                        },
+                    ).apply {
+                        alignment = Pos.CENTER_LEFT
+                    },
+                    Button("检查更新").apply {
+                        setOnAction {
+                            isDisable = true
+                            text = "正在检查..."
+                            checkForUpdates {
+                                Platform.runLater {
+                                    isDisable = false
+                                    text = "检查更新"
+                                }
+                            }
+                        }
+                    },
+                )
+            }
         }.showAndWait()
+    }
+
+    private fun checkForUpdates(onDone: () -> Unit) {
+        Thread({
+            try {
+                val apiUrl = "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+                val release = fetchGitHubRelease(apiUrl)
+
+                Platform.runLater {
+                    onDone()
+                    when {
+                        release == null -> {
+                            showError(Exception("无法获取版本信息，请检查网络连接"))
+                        }
+
+                        compareVersions(APP_VERSION, release.version) -> {
+                            showUpdateDialog(release)
+                        }
+
+                        else -> {
+                            DialogWithIcon.info("检查更新", "当前版本 $APP_VERSION 已是最新。")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                logger.error("检查更新失败", e)
+                Platform.runLater {
+                    onDone()
+                    showError(Exception("检查更新失败: ${e.message}"))
+                }
+            }
+        }, "update-checker").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private data class GitHubRelease(
+        val version: String,
+        val htmlUrl: String,
+        val body: String,
+        val assets: List<GitHubAsset>,
+    )
+
+    private data class GitHubAsset(
+        val name: String,
+        val downloadUrl: String,
+        val size: Long,
+    )
+
+    private fun fetchGitHubRelease(apiUrl: String): GitHubRelease? {
+        return try {
+            val connection = URL(apiUrl).openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("Accept", "application/vnd.github+json")
+            connection.setRequestProperty("User-Agent", "PdmReader4J")
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+
+            val responseCode = connection.responseCode
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                logger.warn("GitHub API 返回 {}，可能尚无 release 或网络不通", responseCode)
+                return null
+            }
+
+            val json = connection.inputStream.bufferedReader().use { it.readText() }
+            val obj = JSONObject(json)
+
+            val tagName = obj.getString("tag_name")
+            val version = tagName.removePrefix("v")
+            val htmlUrl = obj.getString("html_url")
+            val body = obj.optString("body", "")
+
+            val assets = mutableListOf<GitHubAsset>()
+            val assetsArr = obj.optJSONArray("assets")
+            if (assetsArr != null) {
+                for (i in 0 until assetsArr.length()) {
+                    val a = assetsArr.getJSONObject(i)
+                    assets.add(
+                        GitHubAsset(
+                            name = a.getString("name"),
+                            downloadUrl = a.getString("browser_download_url"),
+                            size = a.getLong("size"),
+                        )
+                    )
+                }
+            }
+            logger.info("获取到最新版本: {}，包含 {} 个下载文件", version, assets.size)
+            GitHubRelease(version, htmlUrl, body, assets)
+        } catch (e: Exception) {
+            logger.error("请求 GitHub API 失败", e)
+            null
+        }
+    }
+
+    private fun compareVersions(current: String, latest: String): Boolean {
+        val currentParts = current.split(".").mapNotNull { it.toIntOrNull() }
+        val latestParts = latest.split(".").mapNotNull { it.toIntOrNull() }
+        for (i in 0 until minOf(currentParts.size, latestParts.size)) {
+            if (latestParts[i] > currentParts[i]) return true
+            if (latestParts[i] < currentParts[i]) return false
+        }
+        return latestParts.size > currentParts.size
+    }
+
+    private fun showUpdateDialog(release: GitHubRelease) {
+        val assetList = if (release.assets.isEmpty()) {
+            "（无可下载文件，请前往 GitHub 页面查看）"
+        } else {
+            release.assets.joinToString("\n") { "  \u2022 ${it.name}  (${formatSize(it.size)})" }
+        }
+
+        val changelog = release.body.takeIf { it.isNotBlank() } ?: "（暂无更新说明）"
+
+        val info = """
+            |最新版本: ${release.version}
+            |
+            |更新说明:
+            |$changelog
+            |
+            |可下载文件:
+            |$assetList
+        """.trimMargin()
+
+        Alert(Alert.AlertType.CONFIRMATION).apply {
+            title = "发现新版本"
+            headerText = "有可用更新 - v${release.version}"
+            initOwner(AppState.getStage())
+            dialogPane.content = TextArea(info).apply {
+                isEditable = false
+                isWrapText = true
+                prefWidth = 480.0
+                prefHeight = 220.0
+            }
+            buttonTypes.setAll(
+                ButtonType("前往下载", ButtonBar.ButtonData.OK_DONE),
+                ButtonType("关闭", ButtonBar.ButtonData.CANCEL_CLOSE),
+            )
+            isResizable = true
+        }.showAndWait().ifPresent { btn ->
+            if (btn.buttonData == ButtonBar.ButtonData.OK_DONE) {
+                if (release.assets.isNotEmpty()) {
+                    downloadAsset(release.assets[0])
+                } else {
+                    openInBrowser(release.htmlUrl)
+                }
+            }
+        }
+    }
+
+    private fun downloadAsset(asset: GitHubAsset) {
+        val target = FileChooser().apply {
+            title = "保存 ${asset.name}"
+            initialFileName = asset.name
+        }.showSaveDialog(null) ?: return
+
+        Thread({
+            try {
+                val connection = URL(asset.downloadUrl).openConnection() as HttpURLConnection
+                connection.setRequestProperty("User-Agent", "PdmReader4J")
+                connection.connectTimeout = 15000
+                connection.readTimeout = 15000
+                connection.connect()
+
+                val totalSize = connection.contentLength.toLong()
+                val inputStream = connection.inputStream
+                val outputStream = target.outputStream()
+
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                var totalBytesRead = 0L
+
+                val progressRef = arrayOf<Alert?>(null)
+                val progressBarRef = arrayOf<ProgressBar?>(null)
+                val progressLabelRef = arrayOf<Label?>(null)
+
+                Platform.runLater {
+                    val bar = ProgressBar(0.0)
+                    val label = Label("下载进度: 0%")
+                    val content = VBox(10.0, label, bar).apply { padding = Insets(20.0) }
+                    val alert = Alert(Alert.AlertType.INFORMATION).apply {
+                        title = "下载更新"
+                        headerText = "正在下载 ${asset.name}..."
+                        dialogPane.content = content
+                        buttonTypes.setAll(ButtonType.CANCEL)
+                        isResizable = true
+                    }
+                    progressBarRef[0] = bar
+                    progressLabelRef[0] = label
+                    progressRef[0] = alert
+                    alert.show()
+                }
+
+                Thread.sleep(200)
+
+                var lastUpdate = 0L
+                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                    outputStream.write(buffer, 0, bytesRead)
+                    totalBytesRead += bytesRead
+
+                    val now = System.currentTimeMillis()
+                    if (now - lastUpdate > 300) {
+                        lastUpdate = now
+                        val read = totalBytesRead
+                        Platform.runLater {
+                            if (totalSize > 0) {
+                                val pct = read.toDouble() / totalSize.toDouble()
+                                progressBarRef[0]?.progress = pct
+                                progressLabelRef[0]?.text =
+                                    "下载进度: ${"%.1f".format(pct * 100)}%  (${formatSize(read)} / ${
+                                        formatSize(
+                                            totalSize
+                                        )
+                                    })"
+                            } else {
+                                progressLabelRef[0]?.text = "已下载: ${formatSize(read)}"
+                            }
+                        }
+                    }
+                }
+
+                outputStream.close()
+                inputStream.close()
+                connection.disconnect()
+                logger.info("下载完成: {}", target.absolutePath)
+
+                Platform.runLater {
+                    progressRef[0]?.close()
+                    DialogWithIcon.info(
+                        "下载完成",
+                        "文件已保存到:\n${target.absolutePath}\n\n请手动运行该文件以完成更新。"
+                    )
+                }
+            } catch (e: Exception) {
+                logger.error("下载失败", e)
+                Platform.runLater {
+                    showError(Exception("下载失败: ${e.message}"))
+                }
+            }
+        }, "update-downloader").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun formatSize(bytes: Long): String = when {
+        bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)
+        bytes >= 1_000 -> "%.0f KB".format(bytes / 1_000.0)
+        else -> "$bytes B"
+    }
+
+    private fun openInBrowser(url: String) {
+        try {
+            if (Desktop.isDesktopSupported()) {
+                Desktop.getDesktop().browse(URL(url).toURI())
+            }
+        } catch (e: Exception) {
+            logger.error("无法打开浏览器", e)
+            Platform.runLater {
+                Alert(Alert.AlertType.INFORMATION).apply {
+                    title = "打开下载页面"
+                    headerText = "请手动在浏览器中打开以下链接"
+                    dialogPane.content = TextArea(url).apply {
+                        isEditable = false
+                        prefWidth = 400.0
+                        prefHeight = 60.0
+                    }
+                }.showAndWait()
+            }
+        }
     }
 }

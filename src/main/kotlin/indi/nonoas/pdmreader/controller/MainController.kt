@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong
 class MainController(
     private val catalogService: PdmCatalogService,
 ) {
-    val windowTitle: String = "JavaFX PDM Reader"
+    val windowTitle: String = "PDMReader4J"
     val imports: ObservableList<PdmImportSummary> = FXCollections.observableArrayList()
     val navigationItems: ObservableList<TableNavigationItem> = FXCollections.observableArrayList()
     val columns: ObservableList<PdmColumnDetail> = FXCollections.observableArrayList()

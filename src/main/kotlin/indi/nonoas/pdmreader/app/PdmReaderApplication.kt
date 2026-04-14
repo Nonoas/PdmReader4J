@@ -1,5 +1,6 @@
 package indi.nonoas.pdmreader.app
 
+import github.nonoas.jfx.flat.ui.AppState
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.ddl.DdlGenerator
 import indi.nonoas.pdmreader.parser.PowerDesignerPdmParser
@@ -29,6 +30,8 @@ class PdmReaderApplication : Application() {
         stage.scene = scene
         stage.minWidth = 900.0
         stage.minHeight = 600.0
+
+        AppState.setStage(stage)
         stage.show()
     }
 }

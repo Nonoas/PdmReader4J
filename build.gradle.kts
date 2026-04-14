@@ -1,6 +1,7 @@
 import io.github.fvarrui.javapackager.gradle.PackageTask
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+
 val myMainClass: String by project
 
 buildscript {
@@ -46,12 +47,20 @@ dependencies {
     implementation(kotlin("stdlib"))
     implementation("com.h2database:h2:2.3.232")
     implementation("io.github.nonoas:jfx-flat-ui:2.0.0-SNAPSHOT")
+    implementation("org.json:json:20240303")
+    implementation("org.slf4j:slf4j-api:2.0.13")
+    implementation("ch.qos.logback:logback-classic:1.5.6")
 
     testImplementation(kotlin("test"))
 }
 
 application {
     mainClass.set(myMainClass)
+    applicationDefaultJvmArgs = listOf("-Dfile.encoding=UTF-8")
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.encoding = "UTF-8"
 }
 
 tasks.withType<KotlinJvmCompile>().configureEach {
@@ -64,18 +73,17 @@ tasks.test {
     useJUnitPlatform()
 }
 
-// 添加 packageMyApp 任务用于打包应用程序
 tasks.register<PackageTask>("packageMyApp") {
     dependsOn(tasks.build)
 
     vmArgs = listOf(
+        "-Dfile.encoding=UTF-8",
         "-Djavafx.enablePreview=true",
         "--add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED"
     )
 
     mainClass = myMainClass
 
-    // Java 模块配置
     modules = listOf(
         "java.base",
         "java.management",

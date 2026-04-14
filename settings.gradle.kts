@@ -8,4 +8,4 @@ dependencyResolutionManagement {
         maven("https://maven.aliyun.com/repository/central")
     }
 }
-rootProject.name = "MyPDMReader"
+rootProject.name = "PDMReader4J"
