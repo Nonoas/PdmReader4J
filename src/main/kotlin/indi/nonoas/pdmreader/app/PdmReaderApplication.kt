@@ -9,6 +9,7 @@ import indi.nonoas.pdmreader.service.PdmCatalogService
 import indi.nonoas.pdmreader.ui.MainView
 import javafx.application.Application
 import javafx.scene.Scene
+import javafx.scene.image.Image
 import javafx.stage.Stage
 
 class PdmReaderApplication : Application() {
@@ -24,6 +25,7 @@ class PdmReaderApplication : Application() {
         val scene = Scene(root, 1080.0, 720.0)
 
         stage.title = controller.windowTitle
+        stage.icons.add(Image("/images/logo.png"))
         stage.scene = scene
         stage.minWidth = 900.0
         stage.minHeight = 600.0

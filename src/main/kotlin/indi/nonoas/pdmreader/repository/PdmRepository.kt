@@ -116,7 +116,7 @@ class PdmRepository(
             }
         }
 
-    fun searchNavigation(importId: Long, keyword: String): List<TableNavigationItem> {
+    fun searchNavigation(keyword: String): List<TableNavigationItem> {
         val likeKeyword = "%${keyword.trim().lowercase()}%"
         return databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
@@ -136,8 +136,7 @@ class PdmRepository(
                            cast(null as varchar(255)) as column_code
                     from pdm_table t
                     join import_file i on i.id = t.import_file_id
-                    where t.import_file_id = ?
-                      and (lower(coalesce(t.table_name, '')) like ? or lower(coalesce(t.table_code, '')) like ?)
+                    where lower(coalesce(t.table_name, '')) like ? or lower(coalesce(t.table_code, '')) like ?
 
                     union all
 
@@ -155,20 +154,18 @@ class PdmRepository(
                     from pdm_column c
                     join pdm_table t on t.id = c.table_id
                     join import_file i on i.id = t.import_file_id
-                    where t.import_file_id = ?
-                      and (lower(coalesce(c.column_name, '')) like ? or lower(coalesce(c.column_code, '')) like ?)
+                    where lower(coalesce(c.column_name, '')) like ? or lower(coalesce(c.column_code, '')) like ?
                 ) result
                 order by sort_order,
+                         upper(file_name),
                          upper(coalesce(table_code, table_name)),
                          upper(coalesce(column_code, column_name))
                 """.trimIndent()
             ).use { statement ->
-                statement.setLong(1, importId)
+                statement.setString(1, likeKeyword)
                 statement.setString(2, likeKeyword)
                 statement.setString(3, likeKeyword)
-                statement.setLong(4, importId)
-                statement.setString(5, likeKeyword)
-                statement.setString(6, likeKeyword)
+                statement.setString(4, likeKeyword)
                 statement.executeQuery().use { resultSet ->
                     buildList {
                         while (resultSet.next()) {

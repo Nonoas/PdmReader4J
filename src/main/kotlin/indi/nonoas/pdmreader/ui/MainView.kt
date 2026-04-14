@@ -194,7 +194,7 @@ class MainView(
     private fun createNavigationListView(): ListView<TableNavigationItem> =
         ListView(controller.navigationItems).apply {
             selectionModel.selectionMode = SelectionMode.SINGLE
-            placeholder = Label("选择导入文件后显示表清单")
+            placeholder = Label("选择导入文件后显示表清单，输入关键字后可搜索全部已导入的 PDM")
             cellFactory = Callback {
                 object : ListCell<TableNavigationItem>() {
                     override fun updateItem(item: TableNavigationItem?, empty: Boolean) {
@@ -203,13 +203,13 @@ class MainView(
                             empty || item == null -> null
                             item.type == NavigationItemType.TABLE -> {
                                 val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
-                                "[表] $tableCode-${item.tableName}"
+                                "[表] $tableCode-${item.tableName} · ${item.importFileName}"
                             }
 
                             else -> {
                                 val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
                                 val columnCode = item.matchedColumnCode?.takeIf { it.isNotBlank() } ?: item.matchedColumnName
-                                "[列] $tableCode > ${columnCode.orEmpty()}-${item.tableName}"
+                                "[列] $tableCode > ${columnCode.orEmpty()}-${item.tableName} · ${item.importFileName}"
                             }
                         }
                         styleClass.remove("multi-line-cell")

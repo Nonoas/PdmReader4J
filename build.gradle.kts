@@ -21,7 +21,7 @@ plugins {
 }
 
 group = "indi.nonoas"
-version = "0.1.0-SNAPSHOT"
+version = "0.0.1T"
 
 repositories {
     mavenCentral()
@@ -66,7 +66,7 @@ tasks.test {
 
 // 添加 packageMyApp 任务用于打包应用程序
 tasks.register<PackageTask>("packageMyApp") {
-    dependsOn(tasks.named("assemble"))
+    dependsOn(tasks.build)
 
     vmArgs = listOf(
         "-Djavafx.enablePreview=true",

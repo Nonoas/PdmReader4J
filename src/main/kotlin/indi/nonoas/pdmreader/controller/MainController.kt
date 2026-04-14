@@ -1,11 +1,11 @@
 package indi.nonoas.pdmreader.controller
 
+import github.nonoas.jfx.flat.ui.concurrent.TaskHandler
 import indi.nonoas.pdmreader.model.PdmColumnDetail
 import indi.nonoas.pdmreader.model.PdmImportSummary
 import indi.nonoas.pdmreader.model.PdmTableViewData
 import indi.nonoas.pdmreader.model.TableNavigationItem
 import indi.nonoas.pdmreader.service.PdmCatalogService
-import github.nonoas.jfx.flat.ui.concurrent.TaskHandler
 import javafx.beans.property.*
 import javafx.collections.FXCollections
 import javafx.collections.ObservableList
@@ -166,24 +166,11 @@ class MainController(
         val importsSnapshot = imports.toList()
         val selectedImportSnapshot = selectedImport.get()
         val preferredTableId = currentTableId
-        if (selectedImportSnapshot == null) {
-            applySnapshot(
-                buildSnapshot(
-                    imports = importsSnapshot,
-                    selectedImport = null,
-                    searchKeyword = normalizedKeyword,
-                    preferredTableId = null,
-                    emptyStatusText = "当前没有已导入的 PDM 元数据。",
-                )
-            )
-            return
-        }
-
         statusTextProperty.set(
             if (normalizedKeyword.isBlank()) {
                 "正在加载表清单..."
             } else {
-                "正在搜索“$normalizedKeyword”..."
+                "正在搜索全部已导入 PDM 中的“$normalizedKeyword”..."
             }
         )
         runAsync(onError,
@@ -220,6 +207,7 @@ class MainController(
                 )
             },
             onSuccess = { snapshot ->
+                imports.firstOrNull { it.id == snapshot.item.importId }?.let(selectedImport::set)
                 selectedNavigationItem.set(snapshot.item)
                 applyTableViewData(snapshot.tableViewData, snapshot.item.matchedColumnIdInPdm)
             }
@@ -296,7 +284,7 @@ class MainController(
         preferredTableId: Long?,
         emptyStatusText: String,
     ): ViewSnapshot {
-        if (selectedImport == null) {
+        if (imports.isEmpty()) {
             return ViewSnapshot(
                 imports = imports,
                 selectedImport = null,
@@ -308,46 +296,70 @@ class MainController(
             )
         }
 
-        val navigationItems = catalogService.loadNavigation(selectedImport.id, searchKeyword)
+        val normalizedSelectedImport = selectedImport ?: imports.firstOrNull()
+        if (searchKeyword.isBlank() && normalizedSelectedImport == null) {
+            return ViewSnapshot(
+                imports = imports,
+                selectedImport = null,
+                navigationItems = emptyList(),
+                selectedNavigationItem = null,
+                tableViewData = null,
+                highlightedColumnId = "",
+                emptyStatusText = emptyStatusText,
+            )
+        }
+
+        val isGlobalSearch = searchKeyword.isNotBlank()
+        val navigationItems = if (isGlobalSearch) {
+            catalogService.searchNavigation(searchKeyword)
+        } else {
+            catalogService.loadNavigation(normalizedSelectedImport!!.id, "")
+        }
         if (navigationItems.isEmpty()) {
             return ViewSnapshot(
                 imports = imports,
-                selectedImport = selectedImport,
+                selectedImport = normalizedSelectedImport,
                 navigationItems = emptyList(),
                 selectedNavigationItem = null,
                 tableViewData = null,
                 highlightedColumnId = "",
                 emptyStatusText = if (searchKeyword.isBlank()) {
-                    "文件 ${selectedImport.fileName} 中没有可展示的表。"
+                    "文件 ${normalizedSelectedImport!!.fileName} 中没有可展示的表。"
                 } else {
-                    "未找到与“$searchKeyword”匹配的表或字段。"
+                    "未在已导入的 PDM 中找到与“$searchKeyword”匹配的表或字段。"
                 },
             )
         }
 
         val preferredItem = preferredTableId?.let { tableId ->
             navigationItems.firstOrNull { it.tableId == tableId }
-        } ?: navigationItems.firstOrNull()
+        } ?: if (isGlobalSearch && normalizedSelectedImport != null) {
+            navigationItems.firstOrNull { it.importId == normalizedSelectedImport.id }
+        } else {
+            navigationItems.firstOrNull()
+        }
 
         if (preferredItem == null) {
             return ViewSnapshot(
                 imports = imports,
-                selectedImport = selectedImport,
+                selectedImport = normalizedSelectedImport,
                 navigationItems = navigationItems,
                 selectedNavigationItem = null,
                 tableViewData = null,
                 highlightedColumnId = "",
                 emptyStatusText = if (searchKeyword.isBlank()) {
-                    "文件 ${selectedImport.fileName} 中没有可展示的表。"
+                    "文件 ${normalizedSelectedImport!!.fileName} 中没有可展示的表。"
                 } else {
-                    "未找到与“$searchKeyword”匹配的表或字段。"
+                    "未在已导入的 PDM 中找到与“$searchKeyword”匹配的表或字段。"
                 },
             )
         }
 
+        val resolvedSelectedImport = imports.firstOrNull { it.id == preferredItem.importId } ?: normalizedSelectedImport
+
         return ViewSnapshot(
             imports = imports,
-            selectedImport = selectedImport,
+            selectedImport = resolvedSelectedImport,
             navigationItems = navigationItems,
             selectedNavigationItem = preferredItem,
             tableViewData = catalogService.loadTableViewData(preferredItem.tableId),
