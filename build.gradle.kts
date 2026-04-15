@@ -22,7 +22,7 @@ plugins {
 }
 
 group = "indi.nonoas"
-version = "0.0.1T"
+version = "0.0.1"
 
 repositories {
     mavenCentral()
