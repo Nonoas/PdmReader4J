@@ -17,6 +17,7 @@ import javafx.scene.layout.BorderPane
 import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.VBox
+import javafx.scene.text.Text
 import javafx.stage.FileChooser
 import javafx.util.Callback
 import org.json.JSONObject
@@ -193,14 +194,23 @@ class MainView(
                 object : ListCell<PdmImportSummary>() {
                     override fun updateItem(item: PdmImportSummary?, empty: Boolean) {
                         super.updateItem(item, empty)
-                        text = when {
-                            empty || item == null -> null
-                            else -> "${item.fileName}-${item.modelName}"
-                        }
+
                         styleClass.remove("multi-line-cell")
-                        if (!empty && item != null) {
-                            styleClass.add("multi-line-cell")
+
+                        if (empty || item == null) {
+                            text = null
+                            graphic = null
+                            return
                         }
+
+                        styleClass.add("multi-line-cell")
+                        text = null
+
+                        graphic = buildSingleLineText(
+                            Text(item.modelName),
+                            Text("-"),
+                            Text(item.fileName).apply { styleClass.add("file-name-text") }
+                        )
                     }
                 }
             }
@@ -221,24 +231,36 @@ class MainView(
                 object : ListCell<TableNavigationItem>() {
                     override fun updateItem(item: TableNavigationItem?, empty: Boolean) {
                         super.updateItem(item, empty)
-                        text = when {
-                            empty || item == null -> null
-                            item.type == NavigationItemType.TABLE -> {
-                                val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
-                                "[表] $tableCode-${item.tableName} · ${item.importFileName}"
+
+                        styleClass.remove("multi-line-cell")
+
+                        if (empty || item == null) {
+                            text = null
+                            graphic = null
+                            return
+                        }
+
+                        styleClass.add("multi-line-cell")
+                        text = null
+
+                        val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
+                        val mainText = when (item.type) {
+                            NavigationItemType.TABLE -> {
+                                "[表] $tableCode-${item.tableName}"
                             }
 
                             else -> {
-                                val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
                                 val columnCode =
                                     item.matchedColumnCode?.takeIf { it.isNotBlank() } ?: item.matchedColumnName
-                                "[列] $tableCode > ${columnCode.orEmpty()}-${item.tableName} · ${item.importFileName}"
+                                "[列] $tableCode > ${columnCode.orEmpty()}-${item.tableName}"
                             }
                         }
-                        styleClass.remove("multi-line-cell")
-                        if (!empty && item != null) {
-                            styleClass.add("multi-line-cell")
-                        }
+
+                        graphic = buildSingleLineText(
+                            Text(mainText),
+                            Text("-"),
+                            Text(item.importFileName).apply { styleClass.add("file-name-text") }
+                        )
                     }
                 }
             }
@@ -251,6 +273,11 @@ class MainView(
             bindSelection(controller.selectedNavigationItemProperty())
         }
 
+    private fun buildSingleLineText(vararg texts: Text): HBox =
+        HBox(*texts).apply {
+            spacing = 0.0
+        }
+
     private fun createColumnsTable(): TableView<PdmColumnDetail> {
         val table = TableView<PdmColumnDetail>(controller.columns).apply {
             columnResizePolicy = TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN
@@ -258,7 +285,10 @@ class MainView(
             styleClass.add("columns-table")
         }
 
-        table.columns += textColumn("序号") { it.ordinalPosition.toString() }.apply { prefWidth = 70.0 }
+        table.columns += textColumn("序号") { it.ordinalPosition.toString() }.apply {
+            prefWidth = 70.0
+            comparator = Comparator { a, b -> a.toInt().compareTo(b.toInt()) }
+        }
         table.columns += textColumn("字段名称") { it.name }.apply { prefWidth = 140.0 }
         table.columns += textColumn("字段编码") { it.code.orEmpty() }.apply { prefWidth = 160.0 }
         table.columns += textColumn("数据类型") { it.dataType.orEmpty() }.apply { prefWidth = 150.0 }

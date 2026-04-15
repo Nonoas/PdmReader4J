@@ -1,6 +1,7 @@
 package indi.nonoas.pdmreader.app
 
 import github.nonoas.jfx.flat.ui.AppState
+import github.nonoas.jfx.flat.ui.theme.LightTheme
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.ddl.DdlGenerator
 import indi.nonoas.pdmreader.parser.PowerDesignerPdmParser
@@ -24,6 +25,8 @@ class PdmReaderApplication : Application() {
         val controller = MainController(service)
         val root = MainView(controller).createContent()
         val scene = Scene(root, 1080.0, 720.0)
+
+        setUserAgentStylesheet(LightTheme().userAgentStylesheet)
 
         stage.title = controller.windowTitle
         stage.icons.add(Image("/images/logo.png"))

@@ -104,3 +104,7 @@
     -fx-highlight-fill: #1f5c67;
     -fx-highlight-text-fill: white;
 }
+
+.file-name-text {
+    -fx-fill: #aaa;
+}
