@@ -17,6 +17,7 @@ import javafx.scene.layout.BorderPane
 import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.VBox
+import javafx.scene.shape.Rectangle
 import javafx.scene.text.Text
 import javafx.stage.FileChooser
 import javafx.util.Callback
@@ -190,6 +191,8 @@ class MainView(
         ListView(controller.imports).apply {
             selectionModel.selectionMode = SelectionMode.SINGLE
             placeholder = Label("尚未导入任何 PDM 文件")
+            styleClass.add("rounded-list-view")
+            setRoundedClip(this)
             cellFactory = Callback {
                 object : ListCell<PdmImportSummary>() {
                     override fun updateItem(item: PdmImportSummary?, empty: Boolean) {
@@ -207,7 +210,7 @@ class MainView(
                         text = null
 
                         graphic = buildSingleLineText(
-                            Text(item.modelName),
+                            Text(item.modelName).apply { styleClass.add("model-name-text") },
                             Text("-"),
                             Text(item.fileName).apply { styleClass.add("file-name-text") }
                         )
@@ -227,6 +230,8 @@ class MainView(
         ListView(controller.navigationItems).apply {
             selectionModel.selectionMode = SelectionMode.SINGLE
             placeholder = Label("选择导入文件后显示表清单，输入关键字后可搜索全部已导入的 PDM")
+            styleClass.add("rounded-list-view")
+            setRoundedClip(this)
             cellFactory = Callback {
                 object : ListCell<TableNavigationItem>() {
                     override fun updateItem(item: TableNavigationItem?, empty: Boolean) {
@@ -257,7 +262,7 @@ class MainView(
                         }
 
                         graphic = buildSingleLineText(
-                            Text(mainText),
+                            Text(mainText).apply { styleClass.add("model-name-text") },
                             Text("-"),
                             Text(item.importFileName).apply { styleClass.add("file-name-text") }
                         )
@@ -278,11 +283,23 @@ class MainView(
             spacing = 0.0
         }
 
+    private fun setRoundedClip(control: Control, radius: Double = 12.0) {
+        val clip = Rectangle()
+        clip.arcWidth = radius * 2
+        clip.arcHeight = radius * 2
+        control.clip = clip
+        control.layoutBoundsProperty().addListener { _, _, newValue ->
+            clip.width = newValue.width + 1
+            clip.height = newValue.height + 1
+        }
+    }
+
     private fun createColumnsTable(): TableView<PdmColumnDetail> {
-        val table = TableView<PdmColumnDetail>(controller.columns).apply {
+        val table = TableView(controller.columns).apply {
             columnResizePolicy = TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN
             placeholder = Label("选择表后显示字段列表")
             styleClass.add("columns-table")
+            setRoundedClip(this)
         }
 
         table.columns += textColumn("序号") { it.ordinalPosition.toString() }.apply {
