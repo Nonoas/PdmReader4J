@@ -13,13 +13,11 @@ import javafx.geometry.Insets
 import javafx.geometry.Orientation
 import javafx.geometry.Pos
 import javafx.scene.control.*
-import javafx.scene.layout.BorderPane
-import javafx.scene.layout.HBox
-import javafx.scene.layout.Priority
-import javafx.scene.layout.VBox
+import javafx.scene.layout.*
 import javafx.scene.shape.Rectangle
 import javafx.scene.text.Text
 import javafx.stage.FileChooser
+import javafx.stage.Stage
 import javafx.util.Callback
 import org.json.JSONObject
 import org.slf4j.LoggerFactory
@@ -32,6 +30,8 @@ import java.nio.file.Path
 
 class MainView(
     private val controller: MainController,
+    private val stage: Stage,
+    private val useExtendedWindow: Boolean,
 ) {
     private val logger = LoggerFactory.getLogger(MainView::class.java)
 
@@ -43,6 +43,7 @@ class MainView(
     fun createContent(): BorderPane {
         val searchField = TextField().apply {
             promptText = "搜索表名、表编码、字段名或字段编码"
+            styleClass.add("search-field")
             textProperty().addListener { _, _, newValue ->
                 controller.setSearchKeyword(newValue, ::showError)
             }
@@ -50,7 +51,7 @@ class MainView(
         }
 
         val importButton = Button("导入 PDM").apply {
-            styleClass.add("primary-button")
+            styleClass.addAll("toolbar-button", "primary-button")
             setOnAction {
                 val selectedFiles = choosePdmFiles()
                 if (selectedFiles.isNotEmpty()) {
@@ -59,6 +60,7 @@ class MainView(
             }
         }
         val removeImportButton = Button("移除选中").apply {
+            styleClass.add("toolbar-button")
             disableProperty().bind(controller.selectedImportProperty().isNull)
             setOnAction {
                 val selectedImport = controller.selectedImportProperty().value ?: return@setOnAction
@@ -68,11 +70,13 @@ class MainView(
             }
         }
         val refreshButton = Button("刷新").apply {
+            styleClass.add("toolbar-button")
             setOnAction {
                 controller.reloadImports(onError = ::showError)
             }
         }
         val clearSearchButton = Button("清空搜索").apply {
+            styleClass.add("toolbar-button")
             setOnAction {
                 if (searchField.text.isEmpty()) {
                     controller.clearSearch(::showError)
@@ -82,18 +86,21 @@ class MainView(
             }
         }
         val copyDdlButton = Button("复制 DDL").apply {
+            styleClass.add("toolbar-button")
             disableProperty().bind(controller.canCopyDdlProperty().not())
             setOnAction {
                 runOnUiAction { controller.copySelectedDdlToClipboard() }
             }
         }
-
         val aboutButton = Button("关于").apply {
+            styleClass.add("toolbar-button")
             setOnAction {
                 showAboutDialog()
             }
         }
-        val toolbar = ToolBar(
+
+        val toolbar = HBox(
+            10.0,
             importButton,
             removeImportButton,
             refreshButton,
@@ -102,7 +109,9 @@ class MainView(
             clearSearchButton,
             aboutButton,
         ).apply {
-            styleClass.add("top-toolbar")
+            alignment = Pos.CENTER_LEFT
+            padding = Insets(14.0, 22.0, 18.0, 22.0)
+            styleClass.add("action-toolbar")
         }
 
         val importListView = createImportListView()
@@ -114,6 +123,7 @@ class MainView(
             promptText = "选择表后在这里预览生成的 DDL。"
             textProperty().bind(controller.ddlTextProperty)
             styleClass.add("ddl-area")
+            VBox.setVgrow(this, Priority.ALWAYS)
         }
 
         val headerBox = VBox(
@@ -125,6 +135,7 @@ class MainView(
             Label().apply {
                 textProperty().bind(controller.selectedTableMetaProperty)
                 styleClass.add("table-meta")
+                isWrapText = true
             },
             Label().apply {
                 textProperty().bind(controller.selectedTableCommentProperty)
@@ -132,60 +143,107 @@ class MainView(
                 isWrapText = true
             },
         ).apply {
-            padding = Insets(20.0, 20.0, 16.0, 20.0)
-            styleClass.add("detail-header")
+            padding = Insets(22.0)
+            styleClass.addAll("detail-header", "content-card")
         }
+
+        val columnsSection = createSectionCard("字段明细", columnsTable, Priority.ALWAYS)
+        val ddlSection = createSectionCard("DDL 预览", ddlArea, Priority.ALWAYS)
 
         val rightPane = BorderPane().apply {
             top = headerBox
-            center = VBox(
-                10.0,
-                Label("字段明细").apply { styleClass.add("section-title") },
-                columnsTable,
-                Label("DDL 预览").apply { styleClass.add("section-title") },
-                ddlArea,
-            ).apply {
-                padding = Insets(0.0, 20.0, 20.0, 20.0)
-                VBox.setVgrow(columnsTable, Priority.ALWAYS)
-                VBox.setVgrow(ddlArea, Priority.ALWAYS)
+            center = VBox(16.0, columnsSection, ddlSection).apply {
+                VBox.setVgrow(columnsSection, Priority.ALWAYS)
+                VBox.setVgrow(ddlSection, Priority.ALWAYS)
             }
         }
 
         val leftPane = VBox(
-            10.0,
-            Label("已导入文件").apply { styleClass.add("section-title") },
-            importListView,
-            Label("表与搜索结果").apply { styleClass.add("section-title") },
-            navigationListView,
+            16.0,
+            createSectionCard("已导入文件", importListView, Priority.ALWAYS),
+            createSectionCard("表与搜索结果", navigationListView, Priority.ALWAYS),
         ).apply {
-            padding = Insets(20.0)
             prefWidth = 340.0
-            VBox.setVgrow(importListView, Priority.SOMETIMES)
-            VBox.setVgrow(navigationListView, Priority.ALWAYS)
         }
 
         val splitPane = SplitPane(leftPane, rightPane).apply {
             orientation = Orientation.HORIZONTAL
-            setDividerPositions(0.34)
+            setDividerPositions(0.33)
+            styleClass.add("app-split-pane")
         }
 
         val statusLabel = Label().apply {
             textProperty().bind(controller.statusTextProperty)
+            maxWidth = Double.MAX_VALUE
             styleClass.add("status-label")
         }
 
+        val topContainer = VBox().apply {
+            if (useExtendedWindow) {
+                children.add(createHeaderBar())
+            }
+            children.add(toolbar)
+        }
+
         val root = BorderPane().apply {
-            top = toolbar
+            top = topContainer
             center = splitPane
             bottom = statusLabel
+            styleClass.add("app-root")
             stylesheets.add(
                 MainView::class.java.getResource("/styles/app.css")?.toExternalForm()
                     ?: error("Missing stylesheet: /styles/app.css")
             )
         }
+
         controller.initialize(::showError)
         return root
     }
+
+    @Suppress("DEPRECATION")
+    private fun createHeaderBar(): HeaderBar {
+        val brandBlock = HBox(
+            12.0,
+            Label("PDM").apply { styleClass.add("header-badge") },
+            VBox(
+                2.0,
+                Label(controller.windowTitle).apply { styleClass.add("header-title") },
+                Label("PowerDesigner 模型阅读与检索").apply { styleClass.add("header-subtitle") },
+            ).apply {
+                alignment = Pos.CENTER_LEFT
+            },
+        ).apply {
+            alignment = Pos.CENTER_LEFT
+            styleClass.add("header-brand")
+        }
+
+        val previewChip = Label("JavaFX 25 Preview").apply {
+            styleClass.add("header-chip")
+        }
+
+        return HeaderBar(brandBlock, null, previewChip).apply {
+            styleClass.add("app-header-bar")
+            prefHeight = 54.0
+            isLeadingSystemPadding = true
+            isTrailingSystemPadding = true
+            HeaderBar.setPrefButtonHeight(stage, 44.0)
+            HeaderBar.setMargin(brandBlock, Insets(0.0, 0.0, 0.0, 4.0))
+            HeaderBar.setMargin(previewChip, Insets(0.0, 6.0, 0.0, 0.0))
+            HeaderBar.setDragType(brandBlock, HeaderDragType.DRAGGABLE_SUBTREE)
+            HeaderBar.setDragType(previewChip, HeaderDragType.DRAGGABLE)
+        }
+    }
+
+    private fun createSectionCard(title: String, content: Region, grow: Priority): VBox =
+        VBox(
+            12.0,
+            Label(title).apply { styleClass.add("section-title") },
+            content,
+        ).apply {
+            padding = Insets(18.0)
+            styleClass.add("content-card")
+            VBox.setVgrow(content, grow)
+        }
 
     private fun createImportListView(): ListView<PdmImportSummary> =
         ListView(controller.imports).apply {
@@ -211,7 +269,7 @@ class MainView(
 
                         graphic = buildSingleLineText(
                             Text(item.modelName).apply { styleClass.add("model-name-text") },
-                            Text("-"),
+                            Text(" | ").apply { styleClass.add("cell-separator-text") },
                             Text(item.fileName).apply { styleClass.add("file-name-text") }
                         )
                     }
@@ -250,20 +308,17 @@ class MainView(
 
                         val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
                         val mainText = when (item.type) {
-                            NavigationItemType.TABLE -> {
-                                "[表] $tableCode-${item.tableName}"
-                            }
-
+                            NavigationItemType.TABLE -> "[表] $tableCode - ${item.tableName}"
                             else -> {
                                 val columnCode =
                                     item.matchedColumnCode?.takeIf { it.isNotBlank() } ?: item.matchedColumnName
-                                "[列] $tableCode > ${columnCode.orEmpty()}-${item.tableName}"
+                                "[列] $tableCode > ${columnCode.orEmpty()} - ${item.tableName}"
                             }
                         }
 
                         graphic = buildSingleLineText(
                             Text(mainText).apply { styleClass.add("model-name-text") },
-                            Text("-"),
+                            Text(" | ").apply { styleClass.add("cell-separator-text") },
                             Text(item.importFileName).apply { styleClass.add("file-name-text") }
                         )
                     }
@@ -280,10 +335,11 @@ class MainView(
 
     private fun buildSingleLineText(vararg texts: Text): HBox =
         HBox(*texts).apply {
+            alignment = Pos.CENTER_LEFT
             spacing = 0.0
         }
 
-    private fun setRoundedClip(control: Control, radius: Double = 12.0) {
+    private fun setRoundedClip(control: Control, radius: Double = 18.0) {
         val clip = Rectangle()
         clip.arcWidth = radius * 2
         clip.arcHeight = radius * 2
@@ -331,7 +387,7 @@ class MainView(
 
     private fun textColumn(
         title: String,
-        valueProvider: (PdmColumnDetail) -> String
+        valueProvider: (PdmColumnDetail) -> String,
     ): TableColumn<PdmColumnDetail, String> =
         TableColumn<PdmColumnDetail, String>(title).apply {
             setCellValueFactory { cell ->
@@ -354,14 +410,13 @@ class MainView(
                 FileChooser.ExtensionFilter("PowerDesigner PDM", "*.pdm")
             )
             initialDirectory = defaultInitialDirectory()
-        }.showOpenMultipleDialog(null).orEmpty()
+        }.showOpenMultipleDialog(stage).orEmpty()
 
     private fun confirmRemoveImport(importSummary: PdmImportSummary): Boolean =
         DialogWithIcon.confirm(
             "确认移除",
             "确认移除已导入的 PDM 吗？\n${importSummary.modelName}\n${importSummary.fileName}"
         )
-
 
     private fun defaultInitialDirectory(): File {
         val sampleDirectory = Path.of(
@@ -385,8 +440,6 @@ class MainView(
         logger.error(exception.message, exception)
         DialogWithIcon.error("执行失败", exception.message ?: "未知错误")
     }
-
-    // ==================== 关于 & 更新 ====================
 
     private fun showAboutDialog() {
         val repoUrl = "https://github.com/$GITHUB_REPO"
@@ -535,7 +588,7 @@ class MainView(
         val assetList = if (release.assets.isEmpty()) {
             "（无可下载文件，请前往 GitHub 页面查看）"
         } else {
-            release.assets.joinToString("\n") { "  \u2022 ${it.name}  (${formatSize(it.size)})" }
+            release.assets.joinToString("\n") { "  • ${it.name}  (${formatSize(it.size)})" }
         }
 
         val changelog = release.body.takeIf { it.isNotBlank() } ?: "（暂无更新说明）"
@@ -580,7 +633,7 @@ class MainView(
         val target = FileChooser().apply {
             title = "保存 ${asset.name}"
             initialFileName = asset.name
-        }.showSaveDialog(null) ?: return
+        }.showSaveDialog(stage) ?: return
 
         Thread({
             try {
@@ -612,6 +665,7 @@ class MainView(
                         dialogPane.content = content
                         buttonTypes.setAll(ButtonType.CANCEL)
                         isResizable = true
+                        initOwner(AppState.getStage())
                     }
                     progressBarRef[0] = bar
                     progressLabelRef[0] = label
@@ -688,6 +742,7 @@ class MainView(
                 Alert(Alert.AlertType.INFORMATION).apply {
                     title = "打开下载页面"
                     headerText = "请手动在浏览器中打开以下链接"
+                    initOwner(AppState.getStage())
                     dialogPane.content = TextArea(url).apply {
                         isEditable = false
                         prefWidth = 400.0
