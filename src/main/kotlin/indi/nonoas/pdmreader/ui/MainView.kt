@@ -1,8 +1,10 @@
 package indi.nonoas.pdmreader.ui
 
 import github.nonoas.jfx.flat.ui.AppState
+import github.nonoas.jfx.flat.ui.stage.AppStage
+import github.nonoas.jfx.flat.ui.theme.AppThemeManager
+import github.nonoas.jfx.flat.ui.theme.LightTheme
 import github.nonoas.jfx.flat.ui.theme.Theme
-import indi.nonoas.pdmreader.app.AppThemeManager
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.model.NavigationItemType
 import indi.nonoas.pdmreader.model.PdmColumnDetail
@@ -42,7 +44,7 @@ class MainView(
     companion object {
         const val APP_VERSION = "0.0.1"
         const val GITHUB_REPO = "Nonoas/PdmReader4J"
-        val INSET_1 =  Insets(10.0)
+        val INSET_1 = Insets(10.0)
     }
 
     fun createContent(): BorderPane {
@@ -114,10 +116,10 @@ class MainView(
             searchField,
             clearSearchButton,
             themeSwitcher,
-            aboutButton,
+            aboutButton
         ).apply {
             alignment = Pos.CENTER_LEFT
-            padding =INSET_1
+            padding = INSET_1
             styleClass.add("action-toolbar")
         }
 
@@ -164,23 +166,23 @@ class MainView(
         }
 
         val rightPane = VBox(
-            18.0,
+            10.0,
             headerBox,
             Separator().apply { styleClass.add("panel-separator") },
             detailTabs,
         ).apply {
-            padding = Insets(20.0, 20.0, 20.0, 24.0)
+            padding = INSET_1
             styleClass.add("detail-layout")
         }
 
         val leftPane = VBox(
-            18.0,
+            10.0,
             createSectionPane("已导入文件", importListView, Priority.ALWAYS),
             Separator().apply { styleClass.add("panel-separator") },
             createSectionPane("表与搜索结果", navigationListView, Priority.ALWAYS),
         ).apply {
             prefWidth = 340.0
-            padding = Insets(20.0, 24.0, 20.0, 20.0)
+            padding = INSET_1
             styleClass.add("sidebar-layout")
         }
 
@@ -219,6 +221,7 @@ class MainView(
     }
 
     private fun createThemeSwitcher(): HBox {
+        themeManager.switchTheme(LightTheme())
         val themeComboBox = ComboBox<Theme>().apply {
             items.addAll(themeManager.availableThemes())
             converter = object : StringConverter<Theme>() {
@@ -256,7 +259,9 @@ class MainView(
     private fun createHeaderBar(): HeaderBar {
         val brandBlock = HBox(
             12.0,
-            Label("PDM").apply { styleClass.add("header-badge") },
+            Label("P").apply {
+                styleClass.add("header-badge")
+            },
             VBox(
                 2.0,
                 Label(controller.windowTitle).apply { styleClass.add("header-title") },
@@ -273,12 +278,11 @@ class MainView(
             styleClass.add("header-chip")
         }
 
-        return HeaderBar(brandBlock, null, previewChip).apply {
+        return (stage as AppStage).headerBar.apply {
             styleClass.add("app-header-bar")
+            leading = brandBlock
             prefHeight = 54.0
-            isLeadingSystemPadding = true
-            isTrailingSystemPadding = true
-            HeaderBar.setPrefButtonHeight(stage, 44.0)
+            padding = INSET_1
             HeaderBar.setMargin(brandBlock, Insets(0.0, 0.0, 0.0, 4.0))
             HeaderBar.setMargin(previewChip, Insets(0.0, 6.0, 0.0, 0.0))
             HeaderBar.setDragType(brandBlock, HeaderDragType.DRAGGABLE_SUBTREE)
@@ -304,25 +308,29 @@ class MainView(
             setRoundedClip(this)
             cellFactory = Callback {
                 object : ListCell<PdmImportSummary>() {
+                    private val modelNameText = Text().apply { styleClass.add("model-name-text") }
+                    private val separatorText = Text(" | ").apply { styleClass.add("cell-separator-text") }
+                    private val fileNameText = Text().apply { styleClass.add("file-name-text") }
+                    private val contentBox = HBox(modelNameText, separatorText, fileNameText).apply {
+                        alignment = Pos.CENTER_LEFT
+                        spacing = 0.0
+                    }
+
                     override fun updateItem(item: PdmImportSummary?, empty: Boolean) {
                         super.updateItem(item, empty)
 
-                        styleClass.remove("multi-line-cell")
-
                         if (empty || item == null) {
-                            text = null
                             graphic = null
+                            styleClass.remove("multi-line-cell")
                             return
                         }
 
-                        styleClass.add("multi-line-cell")
-                        text = null
-
-                        graphic = buildSingleLineText(
-                            Text(item.modelName).apply { styleClass.add("model-name-text") },
-                            Text(" | ").apply { styleClass.add("cell-separator-text") },
-                            Text(item.fileName).apply { styleClass.add("file-name-text") }
-                        )
+                        if (!styleClass.contains("multi-line-cell")) {
+                            styleClass.add("multi-line-cell")
+                        }
+                        modelNameText.text = item.modelName
+                        fileNameText.text = item.fileName
+                        if (graphic !== contentBox) graphic = contentBox
                     }
                 }
             }
@@ -343,22 +351,29 @@ class MainView(
             setRoundedClip(this)
             cellFactory = Callback {
                 object : ListCell<TableNavigationItem>() {
+                    private val mainText = Text().apply { styleClass.add("model-name-text") }
+                    private val separatorText = Text(" | ").apply { styleClass.add("cell-separator-text") }
+                    private val fileNameText = Text().apply { styleClass.add("file-name-text") }
+                    private val contentBox = HBox(mainText, separatorText, fileNameText).apply {
+                        alignment = Pos.CENTER_LEFT
+                        spacing = 0.0
+                    }
+
                     override fun updateItem(item: TableNavigationItem?, empty: Boolean) {
                         super.updateItem(item, empty)
 
-                        styleClass.remove("multi-line-cell")
-
                         if (empty || item == null) {
-                            text = null
                             graphic = null
+                            styleClass.remove("multi-line-cell")
                             return
                         }
 
-                        styleClass.add("multi-line-cell")
-                        text = null
+                        if (!styleClass.contains("multi-line-cell")) {
+                            styleClass.add("multi-line-cell")
+                        }
 
                         val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
-                        val mainText = when (item.type) {
+                        mainText.text = when (item.type) {
                             NavigationItemType.TABLE -> "[表] $tableCode - ${item.tableName}"
                             else -> {
                                 val columnCode =
@@ -366,12 +381,8 @@ class MainView(
                                 "[列] $tableCode > ${columnCode.orEmpty()} - ${item.tableName}"
                             }
                         }
-
-                        graphic = buildSingleLineText(
-                            Text(mainText).apply { styleClass.add("model-name-text") },
-                            Text(" | ").apply { styleClass.add("cell-separator-text") },
-                            Text(item.importFileName).apply { styleClass.add("file-name-text") }
-                        )
+                        fileNameText.text = item.importFileName
+                        if (graphic !== contentBox) graphic = contentBox
                     }
                 }
             }
@@ -382,12 +393,6 @@ class MainView(
                 controller.selectNavigationItem(newValue, ::showError)
             }
             bindSelection(controller.selectedNavigationItemProperty())
-        }
-
-    private fun buildSingleLineText(vararg texts: Text): HBox =
-        HBox(*texts).apply {
-            alignment = Pos.CENTER_LEFT
-            spacing = 0.0
         }
 
     private fun setRoundedClip(control: Control, radius: Double = 18.0) {

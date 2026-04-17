@@ -41,7 +41,7 @@ kotlin {
 
 javafx {
     version = "25.0.2"
-    modules("javafx.controls", "javafx.fxml")
+    modules("javafx.controls", "javafx.fxml", "javafx.swing", "javafx.graphics")
 }
 
 dependencies {
