@@ -1,6 +1,8 @@
 package indi.nonoas.pdmreader.ui
 
 import github.nonoas.jfx.flat.ui.AppState
+import github.nonoas.jfx.flat.ui.theme.Theme
+import indi.nonoas.pdmreader.app.AppThemeManager
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.model.NavigationItemType
 import indi.nonoas.pdmreader.model.PdmColumnDetail
@@ -19,6 +21,7 @@ import javafx.scene.text.Text
 import javafx.stage.FileChooser
 import javafx.stage.Stage
 import javafx.util.Callback
+import javafx.util.StringConverter
 import org.json.JSONObject
 import org.slf4j.LoggerFactory
 import java.awt.Desktop
@@ -32,12 +35,14 @@ class MainView(
     private val controller: MainController,
     private val stage: Stage,
     private val useExtendedWindow: Boolean,
+    private val themeManager: AppThemeManager,
 ) {
     private val logger = LoggerFactory.getLogger(MainView::class.java)
 
     companion object {
         const val APP_VERSION = "0.0.1"
         const val GITHUB_REPO = "Nonoas/PdmReader4J"
+        val INSET_1 =  Insets(10.0)
     }
 
     fun createContent(): BorderPane {
@@ -98,6 +103,7 @@ class MainView(
                 showAboutDialog()
             }
         }
+        val themeSwitcher = createThemeSwitcher()
 
         val toolbar = HBox(
             10.0,
@@ -107,10 +113,11 @@ class MainView(
             copyDdlButton,
             searchField,
             clearSearchButton,
+            themeSwitcher,
             aboutButton,
         ).apply {
             alignment = Pos.CENTER_LEFT
-            padding = Insets(14.0, 22.0, 18.0, 22.0)
+            padding =INSET_1
             styleClass.add("action-toolbar")
         }
 
@@ -143,27 +150,33 @@ class MainView(
                 isWrapText = true
             },
         ).apply {
-            padding = Insets(22.0)
+            padding =INSET_1
             styleClass.addAll("detail-header", "content-card")
         }
 
-        val columnsSection = createSectionCard("字段明细", columnsTable, Priority.ALWAYS)
-        val ddlSection = createSectionCard("DDL 预览", ddlArea, Priority.ALWAYS)
-
         val rightPane = BorderPane().apply {
             top = headerBox
-            center = VBox(16.0, columnsSection, ddlSection).apply {
-                VBox.setVgrow(columnsSection, Priority.ALWAYS)
-                VBox.setVgrow(ddlSection, Priority.ALWAYS)
+            center = TabPane(
+                Tab("字段明细", columnsTable).apply { isClosable = false },
+                Tab("DDL 预览", ddlArea).apply { isClosable = false }
+            ).apply {
+                padding =INSET_1
+                styleClass.add("content-card")
             }
+            padding = Insets(0.0, 0.0, 0.0, 4.0)
+            BorderPane.setMargin(headerBox, Insets(0.0, 0.0, 10.0, 0.0))
         }
 
-        val leftPane = VBox(
-            16.0,
-            createSectionCard("已导入文件", importListView, Priority.ALWAYS),
-            createSectionCard("表与搜索结果", navigationListView, Priority.ALWAYS),
+        val leftPane = StackPane(
+            VBox(
+                10.0,
+                createSectionCard("已导入文件", importListView, Priority.ALWAYS),
+                createSectionCard("表与搜索结果", navigationListView, Priority.ALWAYS),
+            ).apply {
+                prefWidth = 340.0
+            }
         ).apply {
-            prefWidth = 340.0
+            padding = Insets(0.0, 4.0, 0.0, 0.0)
         }
 
         val splitPane = SplitPane(leftPane, rightPane).apply {
@@ -198,6 +211,40 @@ class MainView(
 
         controller.initialize(::showError)
         return root
+    }
+
+    private fun createThemeSwitcher(): HBox {
+        val themeComboBox = ComboBox<Theme>().apply {
+            items.addAll(themeManager.availableThemes())
+            converter = object : StringConverter<Theme>() {
+                override fun toString(theme: Theme?): String = theme?.displayName().orEmpty()
+
+                override fun fromString(text: String?): Theme? =
+                    items.firstOrNull { it.displayName() == text }
+            }
+            value = themeManager.currentTheme()
+            visibleRowCount = items.size.coerceAtMost(6)
+            prefWidth = 132.0
+            styleClass.add("theme-combo-box")
+            tooltip = Tooltip("切换界面主题")
+            selectionModel.selectedItemProperty().addListener { _, _, newTheme ->
+                themeManager.switchTheme(newTheme)
+            }
+            themeManager.currentThemeProperty().addListener { _, _, newTheme ->
+                if (newTheme != null && selectionModel.selectedItem?.name != newTheme.name) {
+                    selectionModel.select(newTheme)
+                }
+            }
+        }
+
+        return HBox(
+            8.0,
+            Label("主题").apply { styleClass.add("theme-label") },
+            themeComboBox,
+        ).apply {
+            alignment = Pos.CENTER_LEFT
+            styleClass.add("theme-switcher")
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -240,7 +287,7 @@ class MainView(
             Label(title).apply { styleClass.add("section-title") },
             content,
         ).apply {
-            padding = Insets(18.0)
+            padding =INSET_1
             styleClass.add("content-card")
             VBox.setVgrow(content, grow)
         }
@@ -751,5 +798,12 @@ class MainView(
                 }.showAndWait()
             }
         }
+    }
+
+    private fun Theme.displayName(): String = when (name.lowercase()) {
+        "light" -> "浅色"
+        "dark" -> "深色"
+        "claude" -> "Claude"
+        else -> name.ifBlank { "未命名主题" }
     }
 }
