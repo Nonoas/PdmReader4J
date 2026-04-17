@@ -150,33 +150,38 @@ class MainView(
                 isWrapText = true
             },
         ).apply {
-            padding =INSET_1
-            styleClass.addAll("detail-header", "content-card")
+            padding = Insets(0.0)
+            styleClass.add("detail-header")
         }
 
-        val rightPane = BorderPane().apply {
-            top = headerBox
-            center = TabPane(
-                Tab("字段明细", columnsTable).apply { isClosable = false },
-                Tab("DDL 预览", ddlArea).apply { isClosable = false }
-            ).apply {
-                padding =INSET_1
-                styleClass.add("content-card")
-            }
-            padding = Insets(0.0, 0.0, 0.0, 4.0)
-            BorderPane.setMargin(headerBox, Insets(0.0, 0.0, 10.0, 0.0))
-        }
-
-        val leftPane = StackPane(
-            VBox(
-                10.0,
-                createSectionCard("已导入文件", importListView, Priority.ALWAYS),
-                createSectionCard("表与搜索结果", navigationListView, Priority.ALWAYS),
-            ).apply {
-                prefWidth = 340.0
-            }
+        val detailTabs = TabPane(
+            Tab("字段明细", columnsTable).apply { isClosable = false },
+            Tab("DDL 预览", ddlArea).apply { isClosable = false }
         ).apply {
-            padding = Insets(0.0, 4.0, 0.0, 0.0)
+            tabClosingPolicy = TabPane.TabClosingPolicy.UNAVAILABLE
+            styleClass.addAll("detail-tabs", "floating")
+            VBox.setVgrow(this, Priority.ALWAYS)
+        }
+
+        val rightPane = VBox(
+            18.0,
+            headerBox,
+            Separator().apply { styleClass.add("panel-separator") },
+            detailTabs,
+        ).apply {
+            padding = Insets(20.0, 20.0, 20.0, 24.0)
+            styleClass.add("detail-layout")
+        }
+
+        val leftPane = VBox(
+            18.0,
+            createSectionPane("已导入文件", importListView, Priority.ALWAYS),
+            Separator().apply { styleClass.add("panel-separator") },
+            createSectionPane("表与搜索结果", navigationListView, Priority.ALWAYS),
+        ).apply {
+            prefWidth = 340.0
+            padding = Insets(20.0, 24.0, 20.0, 20.0)
+            styleClass.add("sidebar-layout")
         }
 
         val splitPane = SplitPane(leftPane, rightPane).apply {
@@ -281,14 +286,13 @@ class MainView(
         }
     }
 
-    private fun createSectionCard(title: String, content: Region, grow: Priority): VBox =
+    private fun createSectionPane(title: String, content: Region, grow: Priority): VBox =
         VBox(
             12.0,
             Label(title).apply { styleClass.add("section-title") },
             content,
         ).apply {
-            padding =INSET_1
-            styleClass.add("content-card")
+            styleClass.add("section-pane")
             VBox.setVgrow(content, grow)
         }
 

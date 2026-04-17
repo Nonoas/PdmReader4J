@@ -15,6 +15,56 @@
     -fx-padding: 6 18 6 18;
 }
 
+.app-header-bar .-FX-INTERNAL-header-button-container {
+    -fx-button-default-height: 34;
+}
+
+.-FX-INTERNAL-iconify-button,
+.-FX-INTERNAL-maximize-button,
+.-FX-INTERNAL-close-button {
+    -fx-background-color: transparent;
+}
+
+.-FX-INTERNAL-iconify-button:hover,
+.-FX-INTERNAL-maximize-button:hover {
+    -fx-background-color: -color-neutral-subtle;
+}
+
+.-FX-INTERNAL-close-button:hover {
+    -fx-background-color: -color-danger-emphasis;
+}
+
+.-FX-INTERNAL-iconify-button:pressed,
+.-FX-INTERNAL-maximize-button:pressed,
+.-FX-INTERNAL-close-button:pressed {
+    -fx-opacity: 0.82;
+}
+
+.-FX-INTERNAL-iconify-button > .-FX-INTERNAL-glyph,
+.-FX-INTERNAL-maximize-button > .-FX-INTERNAL-glyph,
+.-FX-INTERNAL-close-button > .-FX-INTERNAL-glyph {
+    -fx-background-color: -color-neutral-emphasis-plus;
+    -fx-scale-shape: false;
+}
+
+.-FX-INTERNAL-iconify-button:hover > .-FX-INTERNAL-glyph,
+.-FX-INTERNAL-maximize-button:hover > .-FX-INTERNAL-glyph,
+.-FX-INTERNAL-iconify-button:active > .-FX-INTERNAL-glyph,
+.-FX-INTERNAL-maximize-button:active > .-FX-INTERNAL-glyph,
+.-FX-INTERNAL-close-button:active > .-FX-INTERNAL-glyph {
+    -fx-background-color: -color-fg-default;
+}
+
+.-FX-INTERNAL-close-button:hover > .-FX-INTERNAL-glyph {
+    -fx-background-color: -color-fg-emphasis;
+}
+
+.-FX-INTERNAL-iconify-button:disabled > .-FX-INTERNAL-glyph,
+.-FX-INTERNAL-maximize-button:disabled > .-FX-INTERNAL-glyph {
+    -fx-background-color: -color-neutral-emphasis;
+    -fx-opacity: 0.28;
+}
+
 .header-brand {
     -fx-alignment: center-left;
 }
@@ -145,6 +195,47 @@
     -fx-background-color: linear-gradient(to bottom right, -color-bg-overlay, -color-bg-subtle);
 }
 
+.sidebar-layout,
+.detail-layout {
+    -fx-background-color: transparent;
+}
+
+.section-pane {
+    -fx-spacing: 12;
+}
+
+.panel-separator {
+    -fx-opacity: 1;
+}
+
+.panel-separator .line {
+    -fx-border-color: -color-border-muted;
+    -fx-border-width: 1 0 0 0;
+}
+
+.detail-header {
+    -fx-padding: 0 0 2 0;
+}
+
+.detail-tabs {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.detail-tabs > .tab-header-area {
+    -fx-background-color: transparent;
+    -fx-padding: 0 0 12 0;
+}
+
+.detail-tabs > .tab-header-area > .tab-header-background {
+    -fx-background-color: transparent;
+}
+
+.detail-tabs > .tab-content-area {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
 .section-title {
     -fx-font-size: 12px;
     -fx-font-weight: 800;
@@ -259,12 +350,16 @@
 
 .table-cell {
     -fx-border-color: transparent;
-    -fx-padding: 10 12 10 12;
+    -fx-padding: 12 12 12 12;
     -fx-text-fill: -color-fg-default;
+    -fx-alignment: center-left;
 }
 
 .table-row-cell {
     -fx-table-cell-border-color: transparent;
+    -fx-border-color: transparent transparent -color-border-subtle transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-alignment: center-left;
 }
 
 .text-area .content {
