@@ -299,7 +299,7 @@ class MainView(
                         styleClass.add("list-item-meta")
                         isWrapText = true
                     }
-                    private val contentBox = VBox(2.0, titleLabel, metaLabel).apply {
+                    private val contentBox = HBox(2.0, titleLabel, metaLabel).apply {
                         styleClass.add("list-item-box")
                     }
                     private val removeMenuItem = MenuItem("移除选中 PDM").apply {
