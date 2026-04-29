@@ -2,7 +2,6 @@ package indi.nonoas.pdmreader.app
 
 import github.nonoas.jfx.flat.ui.AppState
 import github.nonoas.jfx.flat.ui.stage.AppStage
-import github.nonoas.jfx.flat.ui.theme.AppThemeManager
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.ddl.DdlGenerator
 import indi.nonoas.pdmreader.parser.PowerDesignerPdmParser
@@ -31,9 +30,13 @@ class PdmReaderApplication : Application() {
         val useExtendedWindow = Platform.isSupported(ConditionalFeature.EXTENDED_WINDOW)
         val themeManager = AppThemeManager()
         val root = MainView(controller, appStage, useExtendedWindow, themeManager).createContent()
+        val appStylesheet = PdmReaderApplication::class.java.getResource("/styles/app.css")?.toExternalForm()
+            ?: error("Missing stylesheet: /styles/app.css")
 
         appStage.setSize(1080.0, 720.0)
         appStage.setContentView(root)
+        appStage.scene?.stylesheets?.add(appStylesheet)
+        appStage.scene?.let(themeManager::bind)
 
         appStage.title = controller.windowTitle
         appStage.icons.add(Image("/images/logo.png"))

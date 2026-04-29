@@ -31,6 +31,7 @@ class PdmRepositoryTest {
         assertEquals(2, imports.size)
         assertTrue(imports.any { it.id == secondImport.id })
         assertTrue(imports.any { it.id == thirdImport.id })
+        assertTrue(imports.all { it.groupName == tempDir.fileName.toString() })
 
         val tables = service.loadNavigation(secondImport.id, "")
         assertEquals(1, tables.size)
@@ -50,9 +51,11 @@ class PdmRepositoryTest {
         assertTrue(tableViewData.ddl.contains("PRIMARY KEY (ID)"))
         assertTrue(firstImport.id != secondImport.id)
 
-        assertTrue(service.deleteImport(secondImport.id))
-        assertEquals(1, service.listImports().size)
-        assertTrue(service.deleteImport(thirdImport.id))
+        assertEquals(2, service.renameImportGroup(listOf(secondImport.id, thirdImport.id), "核心模型"))
+        val renamedImports = service.listImports()
+        assertTrue(renamedImports.all { it.groupName == "核心模型" })
+
+        assertEquals(2, service.deleteImports(listOf(secondImport.id, thirdImport.id)))
         assertTrue(service.listImports().isEmpty())
     }
 

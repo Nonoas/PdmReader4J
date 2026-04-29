@@ -6,6 +6,7 @@ data class PdmImportSummary(
     val id: Long,
     val filePath: String,
     val fileName: String,
+    val groupName: String,
     val modelName: String,
     val targetDb: String?,
     val importTime: LocalDateTime,

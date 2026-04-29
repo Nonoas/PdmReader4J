@@ -51,7 +51,7 @@ class PdmRepository(
         databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
                 """
-                select id, file_path, file_name, model_name, target_db, import_time
+                select id, file_path, file_name, group_name, model_name, target_db, import_time
                 from import_file
                 order by import_time desc, id desc
                 """.trimIndent()
@@ -67,17 +67,53 @@ class PdmRepository(
         }
 
     fun deleteImport(importId: Long): Boolean =
-        databaseFactory.openConnection().use { connection ->
+        deleteImports(listOf(importId)) > 0
+
+    fun deleteImports(importIds: Collection<Long>): Int {
+        val normalizedIds = importIds.distinct()
+        if (normalizedIds.isEmpty()) {
+            return 0
+        }
+
+        val placeholders = normalizedIds.joinToString(",") { "?" }
+        return databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
                 """
                 delete from import_file
-                where id = ?
+                where id in ($placeholders)
                 """.trimIndent()
             ).use { statement ->
-                statement.setLong(1, importId)
-                statement.executeUpdate() > 0
+                normalizedIds.forEachIndexed { index, importId ->
+                    statement.setLong(index + 1, importId)
+                }
+                statement.executeUpdate()
             }
         }
+    }
+
+    fun renameImportGroup(importIds: Collection<Long>, groupName: String): Int {
+        val normalizedIds = importIds.distinct()
+        if (normalizedIds.isEmpty()) {
+            return 0
+        }
+
+        val placeholders = normalizedIds.joinToString(",") { "?" }
+        return databaseFactory.openConnection().use { connection ->
+            connection.prepareStatement(
+                """
+                update import_file
+                set group_name = ?
+                where id in ($placeholders)
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, groupName)
+                normalizedIds.forEachIndexed { index, importId ->
+                    statement.setLong(index + 2, importId)
+                }
+                statement.executeUpdate()
+            }
+        }
+    }
 
     fun listTableNavigation(importId: Long): List<TableNavigationItem> =
         databaseFactory.openConnection().use { connection ->
@@ -318,20 +354,22 @@ class PdmRepository(
             insert into import_file (
                 file_path,
                 file_name,
+                group_name,
                 file_hash,
                 model_name,
                 target_db,
                 import_time
-            ) values (?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
             Statement.RETURN_GENERATED_KEYS,
         ).use { statement ->
             statement.setString(1, filePath.toAbsolutePath().toString())
             statement.setString(2, filePath.fileName.toString())
-            statement.setString(3, fileHash)
-            statement.setString(4, parsedModel.modelName)
-            statement.setString(5, parsedModel.targetDb)
-            statement.setObject(6, LocalDateTime.now())
+            statement.setString(3, defaultGroupName(filePath.toAbsolutePath().toString()))
+            statement.setString(4, fileHash)
+            statement.setString(5, parsedModel.modelName)
+            statement.setString(6, parsedModel.targetDb)
+            statement.setObject(7, LocalDateTime.now())
             statement.executeUpdate()
             statement.generatedKeys.use { generatedKeys ->
                 if (generatedKeys.next()) {
@@ -415,7 +453,7 @@ class PdmRepository(
     private fun getImportById(connection: Connection, importId: Long): PdmImportSummary? =
         connection.prepareStatement(
             """
-            select id, file_path, file_name, model_name, target_db, import_time
+            select id, file_path, file_name, group_name, model_name, target_db, import_time
             from import_file
             where id = ?
             """.trimIndent()
@@ -435,8 +473,18 @@ class PdmRepository(
             id = getLong("id"),
             filePath = getString("file_path"),
             fileName = getString("file_name"),
+            groupName = getString("group_name")?.takeIf { it.isNotBlank() } ?: defaultGroupName(getString("file_path")),
             modelName = getString("model_name"),
             targetDb = getString("target_db"),
             importTime = getObject("import_time", LocalDateTime::class.java),
         )
+
+    private fun defaultGroupName(filePath: String): String =
+        runCatching {
+            Path.of(filePath)
+                .parent
+                ?.fileName
+                ?.toString()
+                ?.takeIf { it.isNotBlank() }
+        }.getOrNull() ?: "未分组"
 }

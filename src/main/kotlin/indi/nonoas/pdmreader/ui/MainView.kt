@@ -2,24 +2,25 @@ package indi.nonoas.pdmreader.ui
 
 import github.nonoas.jfx.flat.ui.AppState
 import github.nonoas.jfx.flat.ui.stage.AppStage
-import github.nonoas.jfx.flat.ui.theme.AppThemeManager
-import github.nonoas.jfx.flat.ui.theme.LightTheme
+import github.nonoas.jfx.flat.ui.theme.Styles
 import github.nonoas.jfx.flat.ui.theme.Theme
+import indi.nonoas.pdmreader.app.AppThemeManager
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.model.NavigationItemType
 import indi.nonoas.pdmreader.model.PdmColumnDetail
 import indi.nonoas.pdmreader.model.PdmImportSummary
 import indi.nonoas.pdmreader.model.TableNavigationItem
 import javafx.application.Platform
+import javafx.beans.binding.Bindings
 import javafx.beans.property.ReadOnlyObjectProperty
 import javafx.beans.property.SimpleStringProperty
+import javafx.collections.ListChangeListener
 import javafx.geometry.Insets
 import javafx.geometry.Orientation
 import javafx.geometry.Pos
 import javafx.scene.control.*
+import javafx.scene.input.MouseButton
 import javafx.scene.layout.*
-import javafx.scene.shape.Rectangle
-import javafx.scene.text.Text
 import javafx.stage.FileChooser
 import javafx.stage.Stage
 import javafx.util.Callback
@@ -44,13 +45,14 @@ class MainView(
     companion object {
         const val APP_VERSION = "0.0.1"
         const val GITHUB_REPO = "Nonoas/PdmReader4J"
-        val INSET_1 = Insets(10.0)
+        val PAGE_PADDING = Insets(8.0)
+        val SECTION_PADDING = Insets(10.0)
     }
 
     fun createContent(): BorderPane {
         val searchField = TextField().apply {
             promptText = "搜索表名、表编码、字段名或字段编码"
-            styleClass.add("search-field")
+            styleClass.add("search-input")
             textProperty().addListener { _, _, newValue ->
                 controller.setSearchKeyword(newValue, ::showError)
             }
@@ -58,7 +60,7 @@ class MainView(
         }
 
         val importButton = Button("导入 PDM").apply {
-            styleClass.addAll("toolbar-button", "primary-button")
+            styleClass.add(Styles.ACCENT)
             setOnAction {
                 val selectedFiles = choosePdmFiles()
                 if (selectedFiles.isNotEmpty()) {
@@ -66,24 +68,12 @@ class MainView(
                 }
             }
         }
-        val removeImportButton = Button("移除选中").apply {
-            styleClass.add("toolbar-button")
-            disableProperty().bind(controller.selectedImportProperty().isNull)
-            setOnAction {
-                val selectedImport = controller.selectedImportProperty().value ?: return@setOnAction
-                if (confirmRemoveImport(selectedImport)) {
-                    controller.removeImport(selectedImport, ::showError)
-                }
-            }
-        }
         val refreshButton = Button("刷新").apply {
-            styleClass.add("toolbar-button")
             setOnAction {
                 controller.reloadImports(onError = ::showError)
             }
         }
         val clearSearchButton = Button("清空搜索").apply {
-            styleClass.add("toolbar-button")
             setOnAction {
                 if (searchField.text.isEmpty()) {
                     controller.clearSearch(::showError)
@@ -93,14 +83,12 @@ class MainView(
             }
         }
         val copyDdlButton = Button("复制 DDL").apply {
-            styleClass.add("toolbar-button")
             disableProperty().bind(controller.canCopyDdlProperty().not())
             setOnAction {
                 runOnUiAction { controller.copySelectedDdlToClipboard() }
             }
         }
         val aboutButton = Button("关于").apply {
-            styleClass.add("toolbar-button")
             setOnAction {
                 showAboutDialog()
             }
@@ -108,9 +96,8 @@ class MainView(
         val themeSwitcher = createThemeSwitcher()
 
         val toolbar = HBox(
-            10.0,
+            8.0,
             importButton,
-            removeImportButton,
             refreshButton,
             copyDdlButton,
             searchField,
@@ -119,11 +106,11 @@ class MainView(
             aboutButton
         ).apply {
             alignment = Pos.CENTER_LEFT
-            padding = INSET_1
-            styleClass.add("action-toolbar")
+            padding = PAGE_PADDING
+            styleClass.add("toolbar-strip")
         }
 
-        val importListView = createImportListView()
+        val importTreePane = createImportTreePane()
         val navigationListView = createNavigationListView()
         val columnsTable = createColumnsTable()
         val ddlArea = TextArea().apply {
@@ -131,74 +118,73 @@ class MainView(
             isWrapText = false
             promptText = "选择表后在这里预览生成的 DDL。"
             textProperty().bind(controller.ddlTextProperty)
-            styleClass.add("ddl-area")
+            styleClass.add("code-area")
             VBox.setVgrow(this, Priority.ALWAYS)
         }
 
         val headerBox = VBox(
-            8.0,
+            4.0,
             Label().apply {
                 textProperty().bind(controller.selectedTableTitleProperty)
-                styleClass.add("table-title")
+                styleClass.add("detail-title")
             },
             Label().apply {
                 textProperty().bind(controller.selectedTableMetaProperty)
-                styleClass.add("table-meta")
+                styleClass.add("detail-meta")
                 isWrapText = true
             },
             Label().apply {
                 textProperty().bind(controller.selectedTableCommentProperty)
-                styleClass.add("table-comment")
+                styleClass.add("detail-comment")
                 isWrapText = true
             },
         ).apply {
-            padding = Insets(0.0)
+            padding = SECTION_PADDING
             styleClass.add("detail-header")
         }
 
         val detailTabs = TabPane(
-            Tab("字段明细", columnsTable).apply { isClosable = false },
-            Tab("DDL 预览", ddlArea).apply { isClosable = false }
+            Tab("字段", columnsTable).apply { isClosable = false },
+            Tab("DDL", ddlArea).apply { isClosable = false }
         ).apply {
             tabClosingPolicy = TabPane.TabClosingPolicy.UNAVAILABLE
-            styleClass.addAll("detail-tabs", "floating")
+            styleClass.add("content-tabs")
             VBox.setVgrow(this, Priority.ALWAYS)
         }
 
         val rightPane = VBox(
-            10.0,
+            8.0,
             headerBox,
-            Separator().apply { styleClass.add("panel-separator") },
             detailTabs,
         ).apply {
-            padding = INSET_1
-            styleClass.add("detail-layout")
+            padding = PAGE_PADDING
+            styleClass.add("detail-panel")
         }
 
         val leftPane = VBox(
-            10.0,
-            createSectionPane("已导入文件", importListView, Priority.ALWAYS),
-            Separator().apply { styleClass.add("panel-separator") },
+            8.0,
+            createSectionPane("已导入文件", importTreePane, Priority.ALWAYS),
             createSectionPane("表与搜索结果", navigationListView, Priority.ALWAYS),
         ).apply {
-            prefWidth = 340.0
-            padding = INSET_1
-            styleClass.add("sidebar-layout")
+            prefWidth = 320.0
+            padding = PAGE_PADDING
+            styleClass.add("sidebar-panel")
         }
 
         val splitPane = SplitPane(leftPane, rightPane).apply {
             orientation = Orientation.HORIZONTAL
-            setDividerPositions(0.33)
-            styleClass.add("app-split-pane")
+            setDividerPositions(0.31)
+            styleClass.add("workspace-split")
         }
 
         val statusLabel = Label().apply {
             textProperty().bind(controller.statusTextProperty)
             maxWidth = Double.MAX_VALUE
-            styleClass.add("status-label")
+            styleClass.add("status-bar")
         }
 
         val topContainer = VBox().apply {
+            styleClass.add("top-shell")
             if (useExtendedWindow) {
                 children.add(createHeaderBar())
             }
@@ -209,11 +195,7 @@ class MainView(
             top = topContainer
             center = splitPane
             bottom = statusLabel
-            styleClass.add("app-root")
-            stylesheets.add(
-                MainView::class.java.getResource("/styles/app.css")?.toExternalForm()
-                    ?: error("Missing stylesheet: /styles/app.css")
-            )
+            styleClass.add("app-shell")
         }
 
         controller.initialize(::showError)
@@ -221,7 +203,6 @@ class MainView(
     }
 
     private fun createThemeSwitcher(): HBox {
-        themeManager.switchTheme(LightTheme())
         val themeComboBox = ComboBox<Theme>().apply {
             items.addAll(themeManager.availableThemes())
             converter = object : StringConverter<Theme>() {
@@ -232,8 +213,8 @@ class MainView(
             }
             value = themeManager.currentTheme()
             visibleRowCount = items.size.coerceAtMost(6)
-            prefWidth = 132.0
-            styleClass.add("theme-combo-box")
+            prefWidth = 120.0
+            styleClass.add("toolbar-combo")
             tooltip = Tooltip("切换界面主题")
             selectionModel.selectedItemProperty().addListener { _, _, newTheme ->
                 themeManager.switchTheme(newTheme)
@@ -246,43 +227,43 @@ class MainView(
         }
 
         return HBox(
-            8.0,
-            Label("主题").apply { styleClass.add("theme-label") },
+            6.0,
+            Label("主题").apply { styleClass.add("field-label") },
             themeComboBox,
         ).apply {
             alignment = Pos.CENTER_LEFT
-            styleClass.add("theme-switcher")
+            styleClass.add("toolbar-group")
         }
     }
 
     @Suppress("DEPRECATION")
     private fun createHeaderBar(): HeaderBar {
         val brandBlock = HBox(
-            12.0,
-            Label("P").apply {
-                styleClass.add("header-badge")
+            10.0,
+            Label("PDM").apply {
+                styleClass.add("brand-mark")
             },
             VBox(
                 2.0,
-                Label(controller.windowTitle).apply { styleClass.add("header-title") },
-                Label("PowerDesigner 模型阅读与检索").apply { styleClass.add("header-subtitle") },
+                Label(controller.windowTitle).apply { styleClass.add("brand-title") },
+                Label("PowerDesigner 模型阅读与检索").apply { styleClass.add("brand-subtitle") },
             ).apply {
                 alignment = Pos.CENTER_LEFT
             },
         ).apply {
             alignment = Pos.CENTER_LEFT
-            styleClass.add("header-brand")
+            styleClass.add("brand-block")
         }
 
         val previewChip = Label("JavaFX 25 Preview").apply {
-            styleClass.add("header-chip")
+            styleClass.add("window-pill")
         }
 
         return (stage as AppStage).headerBar.apply {
-            styleClass.add("app-header-bar")
+            styleClass.add("window-header")
             leading = brandBlock
-            prefHeight = 54.0
-            padding = INSET_1
+            prefHeight = 48.0
+            padding = PAGE_PADDING
             HeaderBar.setMargin(brandBlock, Insets(0.0, 0.0, 0.0, 4.0))
             HeaderBar.setMargin(previewChip, Insets(0.0, 6.0, 0.0, 0.0))
             HeaderBar.setDragType(brandBlock, HeaderDragType.DRAGGABLE_SUBTREE)
@@ -290,73 +271,165 @@ class MainView(
         }
     }
 
-    private fun createSectionPane(title: String, content: Region, grow: Priority): VBox =
-        VBox(
-            12.0,
-            Label(title).apply { styleClass.add("section-title") },
-            content,
-        ).apply {
-            styleClass.add("section-pane")
-            VBox.setVgrow(content, grow)
+    private fun createSectionPane(title: String, content: Region, grow: Priority): VBox {
+        val contentWrapper = StackPane(content).apply {
+            styleClass.add("panel-surface")
+            VBox.setVgrow(this, Priority.ALWAYS)
         }
 
-    private fun createImportListView(): ListView<PdmImportSummary> =
-        ListView(controller.imports).apply {
-            selectionModel.selectionMode = SelectionMode.SINGLE
-            placeholder = Label("尚未导入任何 PDM 文件")
-            styleClass.add("rounded-list-view")
-            setRoundedClip(this)
+        return VBox(
+            6.0,
+            Label(title).apply { styleClass.add("panel-title") },
+            contentWrapper,
+        ).apply {
+            styleClass.add("panel-section")
+            VBox.setVgrow(contentWrapper, grow)
+        }
+    }
+
+    private fun createImportTreePane(): Region {
+        val treeView = TreeView<ImportTreeNode>().apply {
+            isShowRoot = false
+            selectionModel.selectionMode = SelectionMode.MULTIPLE
+            styleClass.add("compact-tree")
             cellFactory = Callback {
-                object : ListCell<PdmImportSummary>() {
-                    private val modelNameText = Text().apply { styleClass.add("model-name-text") }
-                    private val separatorText = Text(" | ").apply { styleClass.add("cell-separator-text") }
-                    private val fileNameText = Text().apply { styleClass.add("file-name-text") }
-                    private val contentBox = HBox(modelNameText, separatorText, fileNameText).apply {
-                        alignment = Pos.CENTER_LEFT
-                        spacing = 0.0
+                object : TreeCell<ImportTreeNode>() {
+                    private val titleLabel = Label().apply { styleClass.add("list-item-title") }
+                    private val metaLabel = Label().apply {
+                        styleClass.add("list-item-meta")
+                        isWrapText = true
+                    }
+                    private val contentBox = VBox(2.0, titleLabel, metaLabel).apply {
+                        styleClass.add("list-item-box")
+                    }
+                    private val removeMenuItem = MenuItem("移除选中 PDM").apply {
+                        styleClass.add(Styles.DANGER)
+                        setOnAction {
+                            val selectedImports = collectSelectedImports(treeView)
+                            if (selectedImports.isNotEmpty() && confirmRemoveImports(selectedImports)) {
+                                controller.removeImports(selectedImports, ::showError)
+                            }
+                        }
+                    }
+                    private val renameGroupMenuItem = MenuItem("重命名分组").apply {
+                        setOnAction {
+                            val groupNode = treeItem?.value as? ImportTreeNode.Group ?: return@setOnAction
+                            val renamedGroupName = promptGroupName(
+                                initialGroupName = groupNode.displayName,
+                                sourceDescription = groupNode.locationSummary,
+                            ) ?: return@setOnAction
+                            controller.renameImportGroup(groupNode.imports, renamedGroupName, ::showError)
+                        }
+                    }
+                    private val importContextMenu = ContextMenu(removeMenuItem)
+                    private val groupContextMenu = ContextMenu(
+                        renameGroupMenuItem,
+                        SeparatorMenuItem(),
+                        removeMenuItem,
+                    )
+
+                    init {
+                        contentDisplay = ContentDisplay.GRAPHIC_ONLY
+                        setOnMousePressed { event ->
+                            if (event.button == MouseButton.SECONDARY && !isEmpty && treeItem != null) {
+                                if (!treeView.selectionModel.isSelected(index)) {
+                                    treeView.selectionModel.clearAndSelect(index)
+                                }
+                            }
+                        }
                     }
 
-                    override fun updateItem(item: PdmImportSummary?, empty: Boolean) {
+                    override fun updateItem(item: ImportTreeNode?, empty: Boolean) {
                         super.updateItem(item, empty)
 
                         if (empty || item == null) {
+                            text = null
                             graphic = null
-                            styleClass.remove("multi-line-cell")
+                            contextMenu = null
                             return
                         }
 
-                        if (!styleClass.contains("multi-line-cell")) {
-                            styleClass.add("multi-line-cell")
+                        when (item) {
+                            is ImportTreeNode.Group -> {
+                                titleLabel.text = item.displayName
+                                metaLabel.text = "${item.locationSummary} · ${item.importCount} 个 PDM"
+                                contextMenu = groupContextMenu
+                            }
+
+                            is ImportTreeNode.Import -> {
+                                titleLabel.text = item.summary.modelName.ifBlank { item.summary.fileName }
+                                metaLabel.text = buildString {
+                                    append(item.summary.fileName)
+                                    item.summary.targetDb?.takeIf { it.isNotBlank() }?.let {
+                                        append(" · ")
+                                        append(it)
+                                    }
+                                }
+                                contextMenu = importContextMenu
+                            }
+
+                            ImportTreeNode.Root -> {
+                                text = null
+                                graphic = null
+                                contextMenu = null
+                                return
+                            }
                         }
-                        modelNameText.text = item.modelName
-                        fileNameText.text = item.fileName
-                        if (graphic !== contentBox) graphic = contentBox
+                        if (graphic !== contentBox) {
+                            graphic = contentBox
+                        }
                     }
                 }
             }
-            selectionModel.selectedItemProperty().addListener { _, _, newValue ->
-                if (controller.selectedImportProperty().value == newValue) {
-                    return@addListener
-                }
-                controller.selectImport(newValue, ::showError)
-            }
-            bindSelection(controller.selectedImportProperty())
         }
+
+        treeView.selectionModel.selectedItemProperty().addListener { _, _, newValue ->
+            val importNode = newValue?.value as? ImportTreeNode.Import ?: return@addListener
+            val selectedImport = importNode.summary
+            if (controller.selectedImportProperty().value == selectedImport) {
+                return@addListener
+            }
+            controller.selectImport(selectedImport, ::showError)
+        }
+
+        controller.imports.addListener(ListChangeListener<PdmImportSummary> {
+            rebuildImportTree(treeView)
+        })
+        controller.selectedImportProperty().addListener { _, _, newValue ->
+            selectImportTreeNode(treeView, newValue?.id)
+        }
+
+        rebuildImportTree(treeView)
+
+        return StackPane(
+            treeView,
+            Label("尚未导入任何 PDM 文件").apply {
+                styleClass.add("tree-placeholder")
+                isMouseTransparent = true
+                visibleProperty().bind(Bindings.isEmpty(controller.imports))
+                managedProperty().bind(visibleProperty())
+            },
+        )
+    }
 
     private fun createNavigationListView(): ListView<TableNavigationItem> =
         ListView(controller.navigationItems).apply {
             selectionModel.selectionMode = SelectionMode.SINGLE
             placeholder = Label("选择导入文件后显示表清单，输入关键字后可搜索全部已导入的 PDM")
-            styleClass.add("rounded-list-view")
-            setRoundedClip(this)
+            styleClass.add("compact-list")
             cellFactory = Callback {
                 object : ListCell<TableNavigationItem>() {
-                    private val mainText = Text().apply { styleClass.add("model-name-text") }
-                    private val separatorText = Text(" | ").apply { styleClass.add("cell-separator-text") }
-                    private val fileNameText = Text().apply { styleClass.add("file-name-text") }
-                    private val contentBox = HBox(mainText, separatorText, fileNameText).apply {
-                        alignment = Pos.CENTER_LEFT
-                        spacing = 0.0
+                    private val titleLabel = Label().apply { styleClass.add("list-item-title") }
+                    private val metaLabel = Label().apply {
+                        styleClass.add("list-item-meta")
+                        isWrapText = true
+                    }
+                    private val contentBox = VBox(2.0, titleLabel, metaLabel).apply {
+                        styleClass.add("list-item-box")
+                    }
+
+                    init {
+                        contentDisplay = ContentDisplay.GRAPHIC_ONLY
                     }
 
                     override fun updateItem(item: TableNavigationItem?, empty: Boolean) {
@@ -364,24 +437,26 @@ class MainView(
 
                         if (empty || item == null) {
                             graphic = null
-                            styleClass.remove("multi-line-cell")
                             return
                         }
 
-                        if (!styleClass.contains("multi-line-cell")) {
-                            styleClass.add("multi-line-cell")
-                        }
-
                         val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
-                        mainText.text = when (item.type) {
-                            NavigationItemType.TABLE -> "[表] $tableCode - ${item.tableName}"
+                        val tableName = item.tableName.ifBlank { "未命名表" }
+                        titleLabel.text = when (item.type) {
+                            NavigationItemType.TABLE -> "[表] $tableCode"
                             else -> {
                                 val columnCode =
                                     item.matchedColumnCode?.takeIf { it.isNotBlank() } ?: item.matchedColumnName
-                                "[列] $tableCode > ${columnCode.orEmpty()} - ${item.tableName}"
+                                "[列] $tableCode / ${columnCode.orEmpty()}"
                             }
                         }
-                        fileNameText.text = item.importFileName
+                        metaLabel.text = when (item.type) {
+                            NavigationItemType.TABLE -> "$tableName · ${item.importFileName}"
+                            else -> {
+                                val columnName = item.matchedColumnName?.takeIf { it.isNotBlank() } ?: "未命名字段"
+                                "$columnName · $tableName · ${item.importFileName}"
+                            }
+                        }
                         if (graphic !== contentBox) graphic = contentBox
                     }
                 }
@@ -395,23 +470,11 @@ class MainView(
             bindSelection(controller.selectedNavigationItemProperty())
         }
 
-    private fun setRoundedClip(control: Control, radius: Double = 18.0) {
-        val clip = Rectangle()
-        clip.arcWidth = radius * 2
-        clip.arcHeight = radius * 2
-        control.clip = clip
-        control.layoutBoundsProperty().addListener { _, _, newValue ->
-            clip.width = newValue.width + 1
-            clip.height = newValue.height + 1
-        }
-    }
-
     private fun createColumnsTable(): TableView<PdmColumnDetail> {
         val table = TableView(controller.columns).apply {
             columnResizePolicy = TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN
             placeholder = Label("选择表后显示字段列表")
-            styleClass.add("columns-table")
-            setRoundedClip(this)
+            styleClass.add("data-table")
         }
 
         table.columns += textColumn("序号") { it.ordinalPosition.toString() }.apply {
@@ -459,6 +522,80 @@ class MainView(
         }
     }
 
+    private fun rebuildImportTree(treeView: TreeView<ImportTreeNode>) {
+        val root = TreeItem<ImportTreeNode>(ImportTreeNode.Root).apply {
+            isExpanded = true
+        }
+
+        val groupedImports = controller.imports
+            .groupBy { importSummary -> importSummary.groupName.trim().ifBlank { "未分组" } }
+            .entries
+            .sortedWith(compareBy({ groupEntry ->
+                groupEntry.key.lowercase()
+            }))
+
+        groupedImports.forEach { (groupName, imports) ->
+            val groupItem = TreeItem<ImportTreeNode>(
+                ImportTreeNode.Group(
+                    displayName = groupName,
+                    imports = imports,
+                    locationSummary = buildGroupLocationSummary(imports),
+                )
+            ).apply {
+                isExpanded = true
+            }
+            imports.forEach { importSummary ->
+                groupItem.children.add(TreeItem<ImportTreeNode>(ImportTreeNode.Import(importSummary)))
+            }
+            root.children.add(groupItem)
+        }
+
+        treeView.root = root
+        selectImportTreeNode(treeView, controller.selectedImportProperty().value?.id)
+    }
+
+    private fun selectImportTreeNode(treeView: TreeView<ImportTreeNode>, importId: Long?) {
+        if (importId == null) {
+            treeView.selectionModel.clearSelection()
+            return
+        }
+
+        val targetItem = treeView.root?.children
+            ?.asSequence()
+            ?.flatMap { groupItem -> groupItem.children.asSequence() }
+            ?.firstOrNull { treeItem ->
+                (treeItem.value as? ImportTreeNode.Import)?.summary?.id == importId
+            }
+
+        if (targetItem == null) {
+            treeView.selectionModel.clearSelection()
+            return
+        }
+
+        treeView.selectionModel.clearSelection()
+        treeView.selectionModel.select(targetItem)
+    }
+
+    private fun collectSelectedImports(treeView: TreeView<ImportTreeNode>): List<PdmImportSummary> =
+        treeView.selectionModel.selectedItems
+            .toList()
+            .ifEmpty { listOfNotNull(treeView.selectionModel.selectedItem) }
+            .flatMap(::collectImportsFromTreeItem)
+            .distinctBy { it.id }
+
+    private fun collectImportsFromTreeItem(treeItem: TreeItem<ImportTreeNode>?): List<PdmImportSummary> {
+        if (treeItem == null) {
+            return emptyList()
+        }
+
+        return when (val node = treeItem.value) {
+            is ImportTreeNode.Import -> listOf(node.summary)
+            is ImportTreeNode.Group -> treeItem.children.flatMap(::collectImportsFromTreeItem)
+            ImportTreeNode.Root,
+            null -> emptyList()
+        }
+    }
+
     private fun choosePdmFiles(): List<File> =
         FileChooser().apply {
             title = "选择 PowerDesigner PDM 文件"
@@ -473,6 +610,58 @@ class MainView(
             "确认移除",
             "确认移除已导入的 PDM 吗？\n${importSummary.modelName}\n${importSummary.fileName}"
         )
+
+    private fun confirmRemoveImports(importSummaries: List<PdmImportSummary>): Boolean {
+        val targets = importSummaries.distinctBy { it.id }
+        if (targets.size == 1) {
+            return confirmRemoveImport(targets.first())
+        }
+
+        val preview = targets.take(8).joinToString("\n") { "• ${it.fileName}" } +
+            if (targets.size > 8) "\n• ..." else ""
+        return DialogWithIcon.confirm(
+            "确认移除",
+            "确认移除选中的 ${targets.size} 个 PDM 吗？\n$preview"
+        )
+    }
+
+    private fun promptGroupName(initialGroupName: String, sourceDescription: String): String? {
+        while (true) {
+            val result = DialogWithIcon.textInput(
+                title = "重命名分组",
+                headerText = "来源：$sourceDescription",
+                defaultValue = initialGroupName,
+            )
+            if (result.isEmpty) {
+                return null
+            }
+
+            val groupName = result.get().trim()
+            if (groupName.isNotEmpty()) {
+                return groupName
+            }
+
+            DialogWithIcon.warning("分组名称无效", "分组名称不能为空。")
+        }
+    }
+
+    private fun buildGroupLocationSummary(imports: List<PdmImportSummary>): String {
+        val directories = imports.mapNotNull { importSummary ->
+            runCatching {
+                Path.of(importSummary.filePath)
+                    .parent
+                    ?.normalize()
+                    ?.toString()
+                    ?.takeIf { it.isNotBlank() }
+            }.getOrNull()
+        }.distinct()
+
+        return when (directories.size) {
+            0 -> "未知目录"
+            1 -> directories.first()
+            else -> "${directories.size} 个来源目录"
+        }
+    }
 
     private fun defaultInitialDirectory(): File {
         val sampleDirectory = Path.of(
@@ -814,5 +1003,22 @@ class MainView(
         "dark" -> "深色"
         "claude" -> "Claude"
         else -> name.ifBlank { "未命名主题" }
+    }
+
+    private sealed interface ImportTreeNode {
+        data object Root : ImportTreeNode
+
+        data class Group(
+            val displayName: String,
+            val imports: List<PdmImportSummary>,
+            val locationSummary: String,
+        ) : ImportTreeNode {
+            val importCount: Int
+                get() = imports.size
+        }
+
+        data class Import(
+            val summary: PdmImportSummary,
+        ) : ImportTreeNode
     }
 }

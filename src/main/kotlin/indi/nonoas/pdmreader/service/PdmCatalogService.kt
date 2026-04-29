@@ -28,6 +28,11 @@ class PdmCatalogService(
 
     fun deleteImport(importId: Long): Boolean = repository.deleteImport(importId)
 
+    fun deleteImports(importIds: Collection<Long>): Int = repository.deleteImports(importIds)
+
+    fun renameImportGroup(importIds: Collection<Long>, groupName: String): Int =
+        repository.renameImportGroup(importIds, groupName)
+
     fun loadNavigation(importId: Long, keyword: String): List<TableNavigationItem> {
         val normalizedKeyword = keyword.trim()
         return if (normalizedKeyword.isEmpty()) {

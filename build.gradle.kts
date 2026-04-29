@@ -7,6 +7,7 @@ val javafxPreviewJvmArgs = listOf("-Djavafx.enablePreview=true")
 
 buildscript {
     repositories {
+        mavenLocal()
         mavenCentral()
         maven("https://central.sonatype.com/repository/maven-snapshots/")
     }

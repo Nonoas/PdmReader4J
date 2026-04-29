@@ -85,34 +85,100 @@ class MainController(
     }
 
     fun removeImport(importSummary: PdmImportSummary, onError: (Throwable) -> Unit = {}) {
+        removeImports(listOf(importSummary), onError)
+    }
+
+    fun removeImports(importSummaries: List<PdmImportSummary>, onError: (Throwable) -> Unit = {}) {
+        val targets = importSummaries.distinctBy { it.id }
+        if (targets.isEmpty()) {
+            return
+        }
+
         val keyword = searchKeyword
-        statusTextProperty.set("正在移除 ${importSummary.fileName}...")
+        val removedIds = targets.map { it.id }.toSet()
+        val currentSelectedImportId = selectedImport.get()?.id
+        statusTextProperty.set(
+            if (targets.size == 1) {
+                "正在移除 ${targets.first().fileName}..."
+            } else {
+                "正在移除 ${targets.size} 个 PDM..."
+            }
+        )
         runAsync(onError,
             action = {
-                val removed = catalogService.deleteImport(importSummary.id)
+                val removed = catalogService.deleteImports(removedIds)
                 val imports = catalogService.listImports()
-                if (!removed) {
+                val preferredImport = currentSelectedImportId
+                    ?.takeIf { it !in removedIds }
+                    ?.let { importId -> imports.firstOrNull { it.id == importId } }
+                    ?: imports.firstOrNull()
+
+                if (removed <= 0) {
                     buildSnapshot(
                         imports = imports,
-                        selectedImport = imports.firstOrNull(),
+                        selectedImport = preferredImport,
                         searchKeyword = keyword,
                         preferredTableId = null,
-                        emptyStatusText = "未找到要移除的导入记录：${importSummary.fileName}",
+                        emptyStatusText = if (targets.size == 1) {
+                            "未找到要移除的导入记录：${targets.first().fileName}"
+                        } else {
+                            "未找到要移除的导入记录。"
+                        },
                     )
                 } else {
                     val emptyStatusText = if (imports.isEmpty()) {
-                        "已移除 ${importSummary.fileName}，当前没有已导入的 PDM 元数据。"
+                        "已移除 ${removed} 个 PDM，当前没有已导入的 PDM 元数据。"
                     } else {
                         "当前没有已导入的 PDM 元数据。"
                     }
                     buildSnapshot(
                         imports = imports,
-                        selectedImport = imports.firstOrNull(),
+                        selectedImport = preferredImport,
                         searchKeyword = keyword,
                         preferredTableId = null,
                         emptyStatusText = emptyStatusText,
                     )
                 }
+            },
+            onSuccess = ::applySnapshot
+        )
+    }
+
+    fun renameImportGroup(
+        importSummaries: List<PdmImportSummary>,
+        groupName: String,
+        onError: (Throwable) -> Unit = {},
+    ) {
+        val targets = importSummaries.distinctBy { it.id }
+        val normalizedGroupName = groupName.trim()
+        if (targets.isEmpty() || normalizedGroupName.isEmpty()) {
+            return
+        }
+
+        val keyword = searchKeyword
+        val currentSelectedImportId = selectedImport.get()?.id
+        val preferredTableId = currentTableId
+        statusTextProperty.set(
+            if (targets.size == 1) {
+                "正在更新 ${targets.first().fileName} 的分组..."
+            } else {
+                "正在重命名分组为 $normalizedGroupName..."
+            }
+        )
+        runAsync(onError,
+            action = {
+                catalogService.renameImportGroup(targets.map { it.id }, normalizedGroupName)
+                val imports = catalogService.listImports()
+                val preferredImport = currentSelectedImportId?.let { importId ->
+                    imports.firstOrNull { it.id == importId }
+                } ?: imports.firstOrNull()
+                buildSnapshot(
+                    imports = imports,
+                    selectedImport = preferredImport,
+                    searchKeyword = keyword,
+                    preferredTableId = preferredTableId,
+                    emptyStatusText = "当前没有已导入的 PDM 元数据。",
+                )
             },
             onSuccess = ::applySnapshot
         )
