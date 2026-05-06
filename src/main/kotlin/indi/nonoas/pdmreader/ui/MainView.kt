@@ -126,7 +126,7 @@ class MainView(
             4.0,
             Label().apply {
                 textProperty().bind(controller.selectedTableTitleProperty)
-                styleClass.add("detail-title")
+                styleClass.add(Styles.TITLE_1)
             },
             Label().apply {
                 textProperty().bind(controller.selectedTableMetaProperty)
@@ -273,7 +273,6 @@ class MainView(
 
     private fun createSectionPane(title: String, content: Region, grow: Priority): VBox {
         val contentWrapper = StackPane(content).apply {
-            styleClass.add("panel-surface")
             VBox.setVgrow(this, Priority.ALWAYS)
         }
 
@@ -283,6 +282,7 @@ class MainView(
             contentWrapper,
         ).apply {
             styleClass.add("panel-section")
+            styleClass.add("panel-surface")
             VBox.setVgrow(contentWrapper, grow)
         }
     }
