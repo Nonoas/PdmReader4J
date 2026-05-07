@@ -163,8 +163,8 @@ class MainView(
 
         val leftPane = VBox(
             8.0,
-            createSectionPane("已导入文件", importTreePane, Priority.ALWAYS),
-            createSectionPane("表与搜索结果", navigationListView, Priority.ALWAYS),
+            createSectionPane("已导入文件", importTreePane),
+            createSectionPane("表与搜索结果", navigationListView),
         ).apply {
             prefWidth = 320.0
             padding = PAGE_PADDING
@@ -271,7 +271,7 @@ class MainView(
         }
     }
 
-    private fun createSectionPane(title: String, content: Region, grow: Priority): VBox {
+    private fun createSectionPane(title: String, content: Region): VBox {
         val contentWrapper = StackPane(content).apply {
             VBox.setVgrow(this, Priority.ALWAYS)
         }
@@ -283,7 +283,7 @@ class MainView(
         ).apply {
             styleClass.add("panel-section")
             styleClass.add("panel-surface")
-            VBox.setVgrow(contentWrapper, grow)
+            VBox.setVgrow(contentWrapper, Priority.ALWAYS)
         }
     }
 
@@ -299,9 +299,7 @@ class MainView(
                         styleClass.add("list-item-meta")
                         isWrapText = true
                     }
-                    private val contentBox = HBox(2.0, titleLabel, metaLabel).apply {
-                        styleClass.add("list-item-box")
-                    }
+                    private val contentBox = HBox(2.0, titleLabel, metaLabel)
                     private val removeMenuItem = MenuItem("移除选中 PDM").apply {
                         styleClass.add(Styles.DANGER)
                         setOnAction {
@@ -360,10 +358,6 @@ class MainView(
                                 titleLabel.text = item.summary.modelName.ifBlank { item.summary.fileName }
                                 metaLabel.text = buildString {
                                     append(item.summary.fileName)
-                                    item.summary.targetDb?.takeIf { it.isNotBlank() }?.let {
-                                        append(" · ")
-                                        append(it)
-                                    }
                                 }
                                 contextMenu = importContextMenu
                             }
@@ -425,7 +419,7 @@ class MainView(
                         isWrapText = true
                     }
                     private val contentBox = VBox(2.0, titleLabel, metaLabel).apply {
-                        styleClass.add("list-item-box")
+                        padding = Insets(5.0, 0.0, 5.0, 0.0)
                     }
 
                     init {
@@ -618,7 +612,7 @@ class MainView(
         }
 
         val preview = targets.take(8).joinToString("\n") { "• ${it.fileName}" } +
-            if (targets.size > 8) "\n• ..." else ""
+                if (targets.size > 8) "\n• ..." else ""
         return DialogWithIcon.confirm(
             "确认移除",
             "确认移除选中的 ${targets.size} 个 PDM 吗？\n$preview"
