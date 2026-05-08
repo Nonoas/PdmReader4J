@@ -45,7 +45,7 @@ class MainView(
     companion object {
         const val APP_VERSION = "0.0.1"
         const val GITHUB_REPO = "Nonoas/PdmReader4J"
-        val PAGE_PADDING = Insets(8.0)
+        val PAGE_PADDING = Insets(12.0)
         val SECTION_PADDING = Insets(10.0)
     }
 
