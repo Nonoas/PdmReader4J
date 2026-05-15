@@ -1,5 +1,6 @@
 .root,
 .app-shell {
+    -fx-font-smoothing-type: lcd;
     /*    -app-surface: -color-bg-overlay;*/
     /*    -app-surface-alt: -color-bg-subtle;*/
     /*    -app-surface-muted: -color-neutral-subtle;*/

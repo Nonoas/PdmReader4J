@@ -321,10 +321,15 @@ class MainController(
             buildString {
                 append("模型：")
                 append(details.modelName)
-                append("    文件：")
-                append(details.importFileName)
-                append("    目标库：")
+                append('\t')
+                append("分组：")
+                append(details.importGroupName)
+                append('\t')
+                append("目标库：")
                 append(details.targetDb ?: "未知")
+                append('\n')
+                append("所属文件：")
+                append(details.importFilePath)
             }
         )
         selectedTableCommentProperty.set(details.tableComment ?: "")

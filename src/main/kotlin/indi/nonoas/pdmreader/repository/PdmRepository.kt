@@ -121,6 +121,8 @@ class PdmRepository(
                 """
                 select i.id as import_id,
                        i.file_name,
+                       i.file_path,
+                       i.group_name,
                        t.id as table_id,
                        t.table_name,
                        t.table_code,
@@ -140,6 +142,8 @@ class PdmRepository(
                                     type = NavigationItemType.TABLE,
                                     importId = resultSet.getLong("import_id"),
                                     importFileName = resultSet.getString("file_name"),
+                                    importFilePath = resultSet.getString("file_path"),
+                                    importGroupName = resultSet.normalizedGroupName(),
                                     tableId = resultSet.getLong("table_id"),
                                     tableName = resultSet.getString("table_name"),
                                     tableCode = resultSet.getString("table_code"),
@@ -163,6 +167,8 @@ class PdmRepository(
                            'TABLE' as match_type,
                            i.id as import_id,
                            i.file_name,
+                           i.file_path,
+                           i.group_name,
                            t.id as table_id,
                            t.table_name,
                            t.table_code,
@@ -180,6 +186,8 @@ class PdmRepository(
                            'COLUMN' as match_type,
                            i.id as import_id,
                            i.file_name,
+                           i.file_path,
+                           i.group_name,
                            t.id as table_id,
                            t.table_name,
                            t.table_code,
@@ -193,6 +201,7 @@ class PdmRepository(
                     where lower(coalesce(c.column_name, '')) like ? or lower(coalesce(c.column_code, '')) like ?
                 ) result
                 order by sort_order,
+                         upper(coalesce(group_name, '')),
                          upper(file_name),
                          upper(coalesce(table_code, table_name)),
                          upper(coalesce(column_code, column_name))
@@ -214,6 +223,8 @@ class PdmRepository(
                                     },
                                     importId = resultSet.getLong("import_id"),
                                     importFileName = resultSet.getString("file_name"),
+                                    importFilePath = resultSet.getString("file_path"),
+                                    importGroupName = resultSet.normalizedGroupName(),
                                     tableId = resultSet.getLong("table_id"),
                                     tableName = resultSet.getString("table_name"),
                                     tableCode = resultSet.getString("table_code"),
@@ -241,6 +252,7 @@ class PdmRepository(
                        i.id as import_id,
                        i.file_name,
                        i.file_path,
+                       i.group_name,
                        i.model_name,
                        i.target_db
                 from pdm_table t
@@ -259,6 +271,7 @@ class PdmRepository(
                         importId = resultSet.getLong("import_id"),
                         importFileName = resultSet.getString("file_name"),
                         importFilePath = resultSet.getString("file_path"),
+                        importGroupName = resultSet.normalizedGroupName(),
                         modelName = resultSet.getString("model_name"),
                         targetDb = resultSet.getString("target_db"),
                         tableId = resultSet.getLong("table_id"),
@@ -473,11 +486,14 @@ class PdmRepository(
             id = getLong("id"),
             filePath = getString("file_path"),
             fileName = getString("file_name"),
-            groupName = getString("group_name")?.takeIf { it.isNotBlank() } ?: defaultGroupName(getString("file_path")),
+            groupName = normalizedGroupName(),
             modelName = getString("model_name"),
             targetDb = getString("target_db"),
             importTime = getObject("import_time", LocalDateTime::class.java),
         )
+
+    private fun java.sql.ResultSet.normalizedGroupName(): String =
+        getString("group_name")?.takeIf { it.isNotBlank() } ?: defaultGroupName(getString("file_path"))
 
     private fun defaultGroupName(filePath: String): String =
         runCatching {

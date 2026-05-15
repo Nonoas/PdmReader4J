@@ -445,10 +445,28 @@ class MainView(
                             }
                         }
                         metaLabel.text = when (item.type) {
-                            NavigationItemType.TABLE -> "$tableName · ${item.importFileName}"
+                            NavigationItemType.TABLE -> buildString {
+                                append(tableName)
+                                append(" · ")
+                                append(item.importFileName)
+                                append(" · 分组：")
+                                append(item.importGroupName)
+                                append('\n')
+                                append(item.importFilePath)
+                            }
                             else -> {
                                 val columnName = item.matchedColumnName?.takeIf { it.isNotBlank() } ?: "未命名字段"
-                                "$columnName · $tableName · ${item.importFileName}"
+                                buildString {
+                                    append(columnName)
+                                    append(" · ")
+                                    append(tableName)
+                                    append(" · ")
+                                    append(item.importFileName)
+                                    append(" · 分组：")
+                                    append(item.importGroupName)
+                                    append('\n')
+                                    append(item.importFilePath)
+                                }
                             }
                         }
                         if (graphic !== contentBox) graphic = contentBox

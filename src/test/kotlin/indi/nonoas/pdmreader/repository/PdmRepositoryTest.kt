@@ -35,11 +35,17 @@ class PdmRepositoryTest {
 
         val tables = service.loadNavigation(secondImport.id, "")
         assertEquals(1, tables.size)
+        assertEquals(secondImport.groupName, tables.single().importGroupName)
+        assertEquals(importedFile.toAbsolutePath().toString(), tables.single().importFilePath)
 
         val searchByTable = service.searchNavigation("sample")
         assertEquals(2, searchByTable.size)
         assertTrue(searchByTable.all { it.tableCode == "SAMPLE_TABLE" })
         assertEquals(setOf(secondImport.id, thirdImport.id), searchByTable.map { it.importId }.toSet())
+        assertEquals(
+            setOf(importedFile.toAbsolutePath().toString(), anotherImportedFile.toAbsolutePath().toString()),
+            searchByTable.map { it.importFilePath }.toSet()
+        )
 
         val searchByColumn = service.searchNavigation("name")
         assertEquals(2, searchByColumn.size)
@@ -49,6 +55,8 @@ class PdmRepositoryTest {
         val tableViewData = service.loadTableViewData(tables.single().tableId)
         assertEquals(2, tableViewData.details.columns.size)
         assertTrue(tableViewData.ddl.contains("PRIMARY KEY (ID)"))
+        assertEquals(secondImport.groupName, tableViewData.details.importGroupName)
+        assertEquals(importedFile.toAbsolutePath().toString(), tableViewData.details.importFilePath)
         assertTrue(firstImport.id != secondImport.id)
 
         assertEquals(2, service.renameImportGroup(listOf(secondImport.id, thirdImport.id), "核心模型"))
