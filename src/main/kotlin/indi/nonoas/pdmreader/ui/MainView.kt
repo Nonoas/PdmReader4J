@@ -418,7 +418,13 @@ class MainView(
                         styleClass.add("list-item-meta")
                         isWrapText = true
                     }
-                    private val contentBox = VBox(2.0, titleLabel, metaLabel).apply {
+
+                    private val contentCard = VBox(2.0, titleLabel, metaLabel).apply {
+                        padding = Insets(5.0)
+                        styleClass.add("list-item-box")
+                    }
+
+                    private val contentBox = StackPane(contentCard).apply {
                         padding = Insets(5.0, 0.0, 5.0, 0.0)
                     }
 
@@ -454,6 +460,7 @@ class MainView(
                                 append('\n')
                                 append(item.importFilePath)
                             }
+
                             else -> {
                                 val columnName = item.matchedColumnName?.takeIf { it.isNotBlank() } ?: "未命名字段"
                                 buildString {

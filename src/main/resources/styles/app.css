@@ -282,6 +282,11 @@
     -fx-text-fill: -app-text-muted;
 }
 
+.list-item-box {
+    -fx-border-radius: 8px;
+    -fx-border-color: red;
+}
+
 /*.data-table .column-header-background {*/
 /*    -fx-background-color: -app-surface-alt;*/
 /*    -fx-background-radius: 14 14 0 0;*/
