@@ -29,7 +29,7 @@ class PdmReaderApplication : Application() {
         val controller = MainController(service)
         val useExtendedWindow = Platform.isSupported(ConditionalFeature.EXTENDED_WINDOW)
         val themeManager = AppThemeManager()
-        val root = MainView(controller, appStage, useExtendedWindow, themeManager).createContent()
+        val root = MainView(controller, appStage, useExtendedWindow, themeManager, service).createContent()
         val appStylesheet = PdmReaderApplication::class.java.getResource("/styles/app.css")?.toExternalForm()
             ?: error("Missing stylesheet: /styles/app.css")
 

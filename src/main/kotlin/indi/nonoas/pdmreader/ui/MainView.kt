@@ -7,13 +7,13 @@ import github.nonoas.jfx.flat.ui.theme.Theme
 import indi.nonoas.pdmreader.app.AppThemeManager
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.model.NavigationItemType
-import indi.nonoas.pdmreader.model.PdmColumnDetail
 import indi.nonoas.pdmreader.model.PdmImportSummary
 import indi.nonoas.pdmreader.model.TableNavigationItem
+import indi.nonoas.pdmreader.service.PdmCatalogService
 import javafx.application.Platform
 import javafx.beans.binding.Bindings
 import javafx.beans.property.ReadOnlyObjectProperty
-import javafx.beans.property.SimpleStringProperty
+import javafx.beans.property.ReadOnlyObjectWrapper
 import javafx.collections.ListChangeListener
 import javafx.geometry.Insets
 import javafx.geometry.Orientation
@@ -39,6 +39,7 @@ class MainView(
     private val stage: Stage,
     private val useExtendedWindow: Boolean,
     private val themeManager: AppThemeManager,
+    private val catalogService: PdmCatalogService,
 ) {
     private val logger = LoggerFactory.getLogger(MainView::class.java)
 
@@ -83,10 +84,7 @@ class MainView(
             }
         }
         val copyDdlButton = Button("复制 DDL").apply {
-            disableProperty().bind(controller.canCopyDdlProperty().not())
-            setOnAction {
-                runOnUiAction { controller.copySelectedDdlToClipboard() }
-            }
+            isDisable = true
         }
         val aboutButton = Button("关于").apply {
             setOnAction {
@@ -110,52 +108,64 @@ class MainView(
             styleClass.add("toolbar-strip")
         }
 
+        val tableTabPane = TabPane().apply {
+            tabClosingPolicy = TabPane.TabClosingPolicy.ALL_TABS
+            styleClass.add("table-tab-pane")
+            VBox.setVgrow(this, Priority.ALWAYS)
+        }
+
+        // Track active tab for toolbar interactions
+        val activeTableTabProperty = ReadOnlyObjectWrapper<TableDetailTab?>()
+        tableTabPane.selectionModel.selectedItemProperty().addListener { _, _, tab ->
+            activeTableTabProperty.set(tab as? TableDetailTab)
+        }
+
+        // Re-bind copy DDL button to active tab
+        copyDdlButton.setOnAction {
+            val tab = activeTableTabProperty.get()
+            if (tab != null && tab.copyDdl()) {
+                controller.statusTextProperty.set("DDL 已复制到剪贴板。")
+            }
+        }
+        copyDdlButton.disableProperty().unbind()
+        copyDdlButton.disableProperty().bind(
+            Bindings.createBooleanBinding(
+                { activeTableTabProperty.get()?.hasDdlProperty?.get() != true },
+                activeTableTabProperty,
+            ).also { binding ->
+                activeTableTabProperty.addListener { _, _, tab ->
+                    binding.invalidate()
+                    tab?.hasDdlProperty?.addListener { _, _, _ -> binding.invalidate() }
+                }
+            }
+        )
+
+        // Close tabs for removed PDM imports
+        controller.imports.addListener(ListChangeListener<PdmImportSummary> { change ->
+            while (change.next()) {
+                if (change.wasRemoved()) {
+                    val removedIds = change.removed.map { it.id }.toSet()
+                    tableTabPane.tabs.removeAll(
+                        tableTabPane.tabs.filterIsInstance<TableDetailTab>()
+                            .filter { it.importId in removedIds }
+                    )
+                }
+            }
+        })
+
         val importTreePane = createImportTreePane()
-        val navigationListView = createNavigationListView()
-        val columnsTable = createColumnsTable()
-        val ddlArea = TextArea().apply {
-            isEditable = false
-            isWrapText = false
-            promptText = "选择表后在这里预览生成的 DDL。"
-            textProperty().bind(controller.ddlTextProperty)
-            styleClass.add("code-area")
-            VBox.setVgrow(this, Priority.ALWAYS)
-        }
+        val navigationListView = createNavigationListView(tableTabPane)
 
-        val headerBox = VBox(
-            4.0,
-            Label().apply {
-                textProperty().bind(controller.selectedTableTitleProperty)
-                styleClass.add(Styles.TITLE_1)
+        val rightPane = StackPane(
+            tableTabPane,
+            Label("选择左侧列表中的表后查看详情").apply {
+                styleClass.add("tree-placeholder")
+                isMouseTransparent = true
+                visibleProperty().bind(
+                    Bindings.isEmpty(tableTabPane.tabs)
+                )
+                managedProperty().bind(visibleProperty())
             },
-            Label().apply {
-                textProperty().bind(controller.selectedTableMetaProperty)
-                styleClass.add("detail-meta")
-                isWrapText = true
-            },
-            Label().apply {
-                textProperty().bind(controller.selectedTableCommentProperty)
-                styleClass.add("detail-comment")
-                isWrapText = true
-            },
-        ).apply {
-            padding = SECTION_PADDING
-            styleClass.add("detail-header")
-        }
-
-        val detailTabs = TabPane(
-            Tab("字段", columnsTable).apply { isClosable = false },
-            Tab("DDL", ddlArea).apply { isClosable = false }
-        ).apply {
-            tabClosingPolicy = TabPane.TabClosingPolicy.UNAVAILABLE
-            styleClass.add("content-tabs")
-            VBox.setVgrow(this, Priority.ALWAYS)
-        }
-
-        val rightPane = VBox(
-            8.0,
-            headerBox,
-            detailTabs,
         ).apply {
             padding = PAGE_PADDING
             styleClass.add("detail-panel")
@@ -406,7 +416,7 @@ class MainView(
         )
     }
 
-    private fun createNavigationListView(): ListView<TableNavigationItem> =
+    private fun createNavigationListView(tableTabPane: TabPane): ListView<TableNavigationItem> =
         ListView(controller.navigationItems).apply {
             selectionModel.selectionMode = SelectionMode.SINGLE
             placeholder = Label("选择导入文件后显示表清单，输入关键字后可搜索全部已导入的 PDM")
@@ -455,10 +465,8 @@ class MainView(
                                 append(tableName)
                                 append(" · ")
                                 append(item.importFileName)
-                                append(" · 分组：")
+                                append(" · ")
                                 append(item.importGroupName)
-                                append('\n')
-                                append(item.importFilePath)
                             }
 
                             else -> {
@@ -469,10 +477,8 @@ class MainView(
                                     append(tableName)
                                     append(" · ")
                                     append(item.importFileName)
-                                    append(" · 分组：")
+                                    append(" · ")
                                     append(item.importGroupName)
-                                    append('\n')
-                                    append(item.importFilePath)
                                 }
                             }
                         }
@@ -485,53 +491,25 @@ class MainView(
                     return@addListener
                 }
                 controller.selectNavigationItem(newValue, ::showError)
+                if (newValue != null) {
+                    openTableTab(tableTabPane, newValue)
+                }
             }
             bindSelection(controller.selectedNavigationItemProperty())
         }
 
-    private fun createColumnsTable(): TableView<PdmColumnDetail> {
-        val table = TableView(controller.columns).apply {
-            columnResizePolicy = TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN
-            placeholder = Label("选择表后显示字段列表")
-            styleClass.add("data-table")
+    private fun openTableTab(tableTabPane: TabPane, item: TableNavigationItem) {
+        val existing = tableTabPane.tabs
+            .filterIsInstance<TableDetailTab>()
+            .firstOrNull { it.tableId == item.tableId }
+        if (existing != null) {
+            tableTabPane.selectionModel.select(existing)
+        } else {
+            val tab = TableDetailTab(item, catalogService, ::showError)
+            tableTabPane.tabs.add(tab)
+            tableTabPane.selectionModel.select(tab)
         }
-
-        table.columns += textColumn("序号") { it.ordinalPosition.toString() }.apply {
-            prefWidth = 70.0
-            comparator = Comparator { a, b -> a.toInt().compareTo(b.toInt()) }
-        }
-        table.columns += textColumn("字段名称") { it.name }.apply { prefWidth = 140.0 }
-        table.columns += textColumn("字段编码") { it.code.orEmpty() }.apply { prefWidth = 160.0 }
-        table.columns += textColumn("数据类型") { it.dataType.orEmpty() }.apply { prefWidth = 150.0 }
-        table.columns += textColumn("非空") { if (it.nullable) "否" else "是" }.apply { prefWidth = 70.0 }
-        table.columns += textColumn("主键") { if (it.pkFlag) "是" else "" }.apply { prefWidth = 70.0 }
-        table.columns += textColumn("默认值") { it.defaultValue.orEmpty() }.apply { prefWidth = 140.0 }
-        table.columns += textColumn("说明") { it.comment.orEmpty() }.apply { prefWidth = 180.0 }
-
-        controller.highlightedColumnIdProperty.addListener { _, _, newValue ->
-            if (newValue.isNullOrBlank()) {
-                table.selectionModel.clearSelection()
-                return@addListener
-            }
-            val index = controller.columns.indexOfFirst { it.idInPdm == newValue }
-            if (index >= 0) {
-                table.selectionModel.select(index)
-                table.scrollTo(index)
-            }
-        }
-
-        return table
     }
-
-    private fun textColumn(
-        title: String,
-        valueProvider: (PdmColumnDetail) -> String,
-    ): TableColumn<PdmColumnDetail, String> =
-        TableColumn<PdmColumnDetail, String>(title).apply {
-            setCellValueFactory { cell ->
-                SimpleStringProperty(valueProvider(cell.value))
-            }
-        }
 
     private fun <T> ListView<T>.bindSelection(property: ReadOnlyObjectProperty<T?>) {
         property.addListener { _, _, newValue ->
@@ -689,14 +667,6 @@ class MainView(
         return when {
             sampleDirectory.exists() -> sampleDirectory
             else -> File(System.getProperty("user.home"))
-        }
-    }
-
-    private fun runOnUiAction(action: () -> Unit) {
-        try {
-            action()
-        } catch (exception: Exception) {
-            showError(exception)
         }
     }
 
