@@ -15,6 +15,7 @@ import javafx.scene.Node
 import javafx.scene.control.*
 import javafx.scene.input.Clipboard
 import javafx.scene.input.ClipboardContent
+import javafx.scene.input.MouseButton
 import javafx.scene.layout.Priority
 import javafx.scene.layout.VBox
 import org.slf4j.LoggerFactory
@@ -76,7 +77,7 @@ class TableDetailTab(
 
         val headerBox = VBox(
             4.0,
-            Label().apply {
+            CopyableLabel().apply {
                 textProperty().bind(titleText)
                 styleClass.add(Styles.TITLE_1)
             },
@@ -129,6 +130,44 @@ class TableDetailTab(
         table.columns += textColumn("默认值") { it.defaultValue.orEmpty() }.apply { prefWidth = 140.0 }
         table.columns += textColumn("说明") { it.comment.orEmpty() }.apply { prefWidth = 180.0 }
 
+        table.setRowFactory { tableView ->
+            val row = TableRow<PdmColumnDetail>()
+
+            val copyFieldItem = MenuItem("复制字段").apply {
+                setOnAction {
+                    val item = row.item ?: return@setOnAction
+                    val value = item.code?.takeIf { it.isNotBlank() } ?: item.name
+                    Clipboard.getSystemClipboard().setContent(
+                        ClipboardContent().apply { putString(value) }
+                    )
+                }
+            }
+            val copyRowItem = MenuItem("复制整行").apply {
+                setOnAction {
+                    val item = row.item ?: return@setOnAction
+                    val line = formatRowValues(item)
+                    Clipboard.getSystemClipboard().setContent(
+                        ClipboardContent().apply { putString(line) }
+                    )
+                }
+            }
+            val contextMenu = ContextMenu(copyFieldItem, copyRowItem)
+
+            row.setOnMousePressed { event ->
+                if (event.button == MouseButton.SECONDARY && !row.isEmpty) {
+                    if (!row.isSelected) {
+                        tableView.selectionModel.clearSelection()
+                        tableView.selectionModel.select(row.index)
+                    }
+                    row.contextMenu = contextMenu
+                } else {
+                    row.contextMenu = null
+                }
+            }
+
+            row
+        }
+
         highlightedColumnId.addListener { _, _, newValue ->
             if (newValue.isNullOrBlank()) {
                 table.selectionModel.clearSelection()
@@ -143,6 +182,17 @@ class TableDetailTab(
 
         return table
     }
+
+    private fun formatRowValues(item: PdmColumnDetail): String = listOf(
+        item.ordinalPosition.toString(),
+        item.name,
+        item.code.orEmpty(),
+        item.dataType.orEmpty(),
+        if (item.nullable) "否" else "是",
+        if (item.pkFlag) "是" else "",
+        item.defaultValue.orEmpty(),
+        item.comment.orEmpty(),
+    ).joinToString("  ")
 
     private fun textColumn(
         title: String,

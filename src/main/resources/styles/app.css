@@ -172,6 +172,12 @@
     -fx-padding: 10px
 }
 
+.copyable-label-menu,
+.copyable-label-menu > .menu-item {
+    -fx-font-size: 13px;
+    -fx-font-weight: 100;
+}
+
 /*.detail-meta,*/
 /*.detail-comment {*/
 /*    -fx-font-size: 12px;*/
