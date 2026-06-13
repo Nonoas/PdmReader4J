@@ -1,6 +1,7 @@
 package indi.nonoas.pdmreader.app
 
 import github.nonoas.jfx.flat.ui.theme.*
+import indi.nonoas.pdmreader.repository.PdmRepository
 import javafx.application.Application
 import javafx.beans.property.ReadOnlyObjectProperty
 import javafx.beans.property.ReadOnlyObjectWrapper
@@ -9,7 +10,12 @@ import javafx.scene.paint.Color
 
 class AppThemeManager(
     initialTheme: Theme = Claude(),
+    private val repository: PdmRepository? = null,
 ) {
+    companion object {
+        private const val THEME_CONFIG_KEY = "app.theme"
+    }
+
     private val availableThemes = listOf(
         Claude(),
         CupertinoDark(),
@@ -20,7 +26,14 @@ class AppThemeManager(
         PrimerDark(),
         PrimerLight()
     )
-    private val currentTheme = ReadOnlyObjectWrapper(resolveTheme(initialTheme))
+
+    private val savedThemeName: String? = repository?.getConfig(THEME_CONFIG_KEY)
+    private val resolvedInitial: Theme = if (savedThemeName != null) {
+        findTheme(savedThemeName) ?: resolveTheme(initialTheme)
+    } else {
+        resolveTheme(initialTheme)
+    }
+    private val currentTheme = ReadOnlyObjectWrapper(resolvedInitial)
 
     fun availableThemes(): List<Theme> = availableThemes
 
@@ -42,6 +55,7 @@ class AppThemeManager(
             return
         }
         currentTheme.set(resolvedTheme)
+        repository?.saveConfig(THEME_CONFIG_KEY, resolvedTheme.name)
     }
 
     private fun resolveTheme(initialTheme: Theme): Theme =

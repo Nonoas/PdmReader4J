@@ -91,6 +91,30 @@ class PdmRepository(
         }
     }
 
+    fun saveConfig(key: String, value: String) {
+        databaseFactory.openConnection().use { connection ->
+            connection.prepareStatement(
+                "merge into app_config (config_key, config_value) key (config_key) values (?, ?)"
+            ).use { statement ->
+                statement.setString(1, key)
+                statement.setString(2, value)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    fun getConfig(key: String): String? =
+        databaseFactory.openConnection().use { connection ->
+            connection.prepareStatement(
+                "select config_value from app_config where config_key = ?"
+            ).use { statement ->
+                statement.setString(1, key)
+                statement.executeQuery().use { resultSet ->
+                    if (resultSet.next()) resultSet.getString("config_value") else null
+                }
+            }
+        }
+
     fun renameImportGroup(importIds: Collection<Long>, groupName: String): Int {
         val normalizedIds = importIds.distinct()
         if (normalizedIds.isEmpty()) {

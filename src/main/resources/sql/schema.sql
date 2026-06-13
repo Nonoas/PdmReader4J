@@ -45,3 +45,8 @@ create index if not exists idx_pdm_table_name on pdm_table(table_name);
 create index if not exists idx_pdm_table_code on pdm_table(table_code);
 create index if not exists idx_pdm_column_name on pdm_column(column_name);
 create index if not exists idx_pdm_column_code on pdm_column(column_code);
+
+create table if not exists app_config (
+    config_key varchar(255) primary key,
+    config_value varchar(4000) not null
+);

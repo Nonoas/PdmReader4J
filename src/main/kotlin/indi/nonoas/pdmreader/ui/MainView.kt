@@ -420,23 +420,28 @@ class MainView(
         ListView(controller.navigationItems).apply {
             selectionModel.selectionMode = SelectionMode.SINGLE
             placeholder = Label("选择导入文件后显示表清单，输入关键字后可搜索全部已导入的 PDM")
-            styleClass.add("compact-list")
+            styleClass.addAll("compact-list", "navigation-list")
             cellFactory = Callback {
                 object : ListCell<TableNavigationItem>() {
-                    private val titleLabel = Label().apply { styleClass.add("list-item-title") }
+                    private val typeLabel = Label().apply {
+                        styleClass.add("type-badge")
+                    }
+                    private val nameLabel = Label().apply {
+                        styleClass.add("list-item-title")
+                    }
+                    private val titleRow = HBox(4.0, typeLabel, nameLabel).apply {
+                        alignment = Pos.CENTER_LEFT
+                    }
                     private val metaLabel = Label().apply {
                         styleClass.add("list-item-meta")
                         isWrapText = true
                     }
 
-                    private val contentCard = VBox(2.0, titleLabel, metaLabel).apply {
-                        padding = Insets(5.0)
+                    private val contentCard = VBox(2.0, titleRow, metaLabel).apply {
                         styleClass.add("list-item-box")
                     }
 
-                    private val contentBox = StackPane(contentCard).apply {
-                        padding = Insets(5.0, 0.0, 5.0, 0.0)
-                    }
+                    private val contentBox = StackPane(contentCard)
 
                     init {
                         contentDisplay = ContentDisplay.GRAPHIC_ONLY
@@ -452,12 +457,23 @@ class MainView(
 
                         val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
                         val tableName = item.tableName.ifBlank { "未命名表" }
-                        titleLabel.text = when (item.type) {
-                            NavigationItemType.TABLE -> "[表] $tableCode"
+                        typeLabel.apply {
+                            styleClass.removeAll("table-type", "column-type")
+                            when (item.type) {
+                                NavigationItemType.TABLE -> styleClass.add("table-type")
+                                NavigationItemType.COLUMN_MATCH -> styleClass.add("column-type")
+                            }
+                            text = when (item.type) {
+                                NavigationItemType.TABLE -> "[表]"
+                                else -> "[列]"
+                            }
+                        }
+                        nameLabel.text = when (item.type) {
+                            NavigationItemType.TABLE -> tableCode
                             else -> {
                                 val columnCode =
                                     item.matchedColumnCode?.takeIf { it.isNotBlank() } ?: item.matchedColumnName
-                                "[列] $tableCode / ${columnCode.orEmpty()}"
+                                "$tableCode / ${columnCode.orEmpty()}"
                             }
                         }
                         metaLabel.text = when (item.type) {
