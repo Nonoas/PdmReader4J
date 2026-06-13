@@ -47,11 +47,54 @@ class TableDetailTab(
         tooltip = Tooltip("${item.tableName}\n${item.importFilePath}")
         isClosable = true
         content = buildContent()
+        contextMenu = createTabContextMenu()
         loadData()
 
         setOnClosed {
             logger.debug("Tab closed for table: {}", item.tableName)
         }
+    }
+
+    private fun createTabContextMenu(): ContextMenu {
+        val closeLeft = MenuItem("关闭左侧所有")
+        val closeRight = MenuItem("关闭右侧所有")
+        val closeAll = MenuItem("关闭全部")
+        val closeOthers = MenuItem("关闭除此之外")
+
+        val menu = ContextMenu(closeLeft, closeRight, closeAll, closeOthers)
+
+        menu.setOnShowing {
+            val tabs = tabPane.tabs
+            val index = tabs.indexOf(this)
+            closeLeft.isDisable = index <= 0
+            closeRight.isDisable = index >= tabs.size - 1
+            closeAll.isDisable = tabs.size <= 1
+            closeOthers.isDisable = tabs.size <= 1
+        }
+
+        closeLeft.setOnAction {
+            val tabs = tabPane.tabs
+            val index = tabs.indexOf(this@TableDetailTab)
+            if (index > 0) {
+                tabs.removeAll(tabs.subList(0, index).toList())
+            }
+        }
+        closeRight.setOnAction {
+            val tabs = tabPane.tabs
+            val index = tabs.indexOf(this@TableDetailTab)
+            if (index < tabs.size - 1) {
+                tabs.removeAll(tabs.subList(index + 1, tabs.size).toList())
+            }
+        }
+        closeAll.setOnAction {
+            tabPane.tabs.clear()
+        }
+        closeOthers.setOnAction {
+            val tabs = tabPane.tabs
+            tabs.removeAll(tabs.filter { it !== this@TableDetailTab })
+        }
+
+        return menu
     }
 
     fun copyDdl(): Boolean {
@@ -84,11 +127,6 @@ class TableDetailTab(
             Label().apply {
                 textProperty().bind(metaText)
                 styleClass.add("detail-meta")
-                isWrapText = true
-            },
-            Label().apply {
-                textProperty().bind(commentText)
-                styleClass.add("detail-comment")
                 isWrapText = true
             },
         ).apply {
