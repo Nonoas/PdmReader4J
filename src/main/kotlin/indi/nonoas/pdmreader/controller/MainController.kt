@@ -1,10 +1,7 @@
 package indi.nonoas.pdmreader.controller
 
 import github.nonoas.jfx.flat.ui.concurrent.TaskHandler
-import indi.nonoas.pdmreader.model.PdmColumnDetail
-import indi.nonoas.pdmreader.model.PdmImportSummary
-import indi.nonoas.pdmreader.model.PdmTableViewData
-import indi.nonoas.pdmreader.model.TableNavigationItem
+import indi.nonoas.pdmreader.model.*
 import indi.nonoas.pdmreader.service.PdmCatalogService
 import javafx.beans.property.*
 import javafx.collections.FXCollections
@@ -35,6 +32,8 @@ class MainController(
     private val canCopyDdl = ReadOnlyBooleanWrapper(false)
 
     private var searchKeyword: String = ""
+    private var searchScopeMode: SearchScopeMode = SearchScopeMode.CURRENT_SELECTION
+    private var scopedImportIds: List<Long> = emptyList()
     private var currentTableId: Long? = null
     private val requestSequence = AtomicLong(0)
 
@@ -47,6 +46,15 @@ class MainController(
 
     fun initialize(onError: (Throwable) -> Unit = {}) {
         reloadImports(onError = onError)
+    }
+
+    fun setSearchScopeMode(mode: SearchScopeMode, onError: (Throwable) -> Unit = {}) {
+        if (searchScopeMode == mode) {
+            return
+        }
+
+        searchScopeMode = mode
+        rebuildCurrentView(onError, statusText = buildSearchProgressText(searchKeyword))
     }
 
     fun importPdm(path: Path, onError: (Throwable) -> Unit = {}) {
@@ -207,10 +215,16 @@ class MainController(
     }
 
     fun selectImport(importSummary: PdmImportSummary?, onError: (Throwable) -> Unit = {}) {
+        scopedImportIds = importSummary?.let { listOf(it.id) } ?: emptyList()
+        currentTableId = null
         val importsSnapshot = imports.toList()
         val keyword = searchKeyword
         statusTextProperty.set(
-            importSummary?.let { "正在加载 ${it.fileName} 的表结构..." } ?: "未选择导入文件。"
+            if (keyword.isBlank()) {
+                importSummary?.let { "正在加载 ${it.fileName} 的表结构..." } ?: "未选择导入文件。"
+            } else {
+                buildSearchProgressText(keyword)
+            }
         )
         runAsync(onError,
             action = {
@@ -226,19 +240,41 @@ class MainController(
         )
     }
 
+    fun selectImportGroup(importSummaries: List<PdmImportSummary>, onError: (Throwable) -> Unit = {}) {
+        scopedImportIds = importSummaries.map { it.id }.distinct()
+        currentTableId = null
+        val importsSnapshot = imports.toList()
+        val selectedImportSnapshot = selectedImport.get()
+        statusTextProperty.set(
+            if (scopedImportIds.isEmpty()) {
+                "未选择分组。"
+            } else if (searchKeyword.isNotBlank()) {
+                buildSearchProgressText(searchKeyword)
+            } else {
+                "正在加载当前分组的表结构..."
+            }
+        )
+        runAsync(onError,
+            action = {
+                buildSnapshot(
+                    imports = importsSnapshot,
+                    selectedImport = selectedImportSnapshot,
+                    searchKeyword = searchKeyword,
+                    preferredTableId = null,
+                    emptyStatusText = "当前没有已导入的 PDM 元数据。",
+                )
+            },
+            onSuccess = ::applySnapshot
+        )
+    }
+
     fun setSearchKeyword(keyword: String, onError: (Throwable) -> Unit = {}) {
         searchKeyword = keyword.trim()
         val normalizedKeyword = searchKeyword
         val importsSnapshot = imports.toList()
         val selectedImportSnapshot = selectedImport.get()
         val preferredTableId = currentTableId
-        statusTextProperty.set(
-            if (normalizedKeyword.isBlank()) {
-                "正在加载表清单..."
-            } else {
-                "正在搜索全部已导入 PDM 中的“$normalizedKeyword”..."
-            }
-        )
+        statusTextProperty.set(buildSearchProgressText(normalizedKeyword))
         runAsync(onError,
             action = {
                 buildSnapshot(
@@ -264,6 +300,7 @@ class MainController(
             return
         }
 
+        currentTableId = item.tableId
         statusTextProperty.set("正在加载 ${item.tableName} 的表详情...")
         runAsync(onError,
             action = {
@@ -295,7 +332,9 @@ class MainController(
     }
 
     private fun applySnapshot(snapshot: ViewSnapshot) {
-        imports.setAll(snapshot.imports)
+        if (imports != snapshot.imports) {
+            imports.setAll(snapshot.imports)
+        }
         selectedImport.set(snapshot.selectedImport)
         navigationItems.setAll(snapshot.navigationItems)
         selectedNavigationItem.set(snapshot.selectedNavigationItem)
@@ -368,7 +407,10 @@ class MainController(
         }
 
         val normalizedSelectedImport = selectedImport ?: imports.firstOrNull()
-        if (searchKeyword.isBlank() && normalizedSelectedImport == null) {
+        val normalizedScopedImportIds = scopedImportIds.filter { scopedId ->
+            imports.any { it.id == scopedId }
+        }
+        if (searchKeyword.isBlank() && normalizedSelectedImport == null && normalizedScopedImportIds.isEmpty()) {
             return ViewSnapshot(
                 imports = imports,
                 selectedImport = null,
@@ -380,11 +422,30 @@ class MainController(
             )
         }
 
-        val isGlobalSearch = searchKeyword.isNotBlank()
-        val navigationItems = if (isGlobalSearch) {
-            catalogService.searchNavigation(searchKeyword)
+        val effectiveSearchScope = resolveEffectiveSearchScope(
+            keyword = searchKeyword,
+            selectedImport = normalizedSelectedImport,
+            scopedImportIds = normalizedScopedImportIds,
+        )
+        val navigationItems = if (searchKeyword.isBlank()) {
+            when {
+                normalizedScopedImportIds.isNotEmpty() -> catalogService.loadNavigation(normalizedScopedImportIds)
+                normalizedSelectedImport != null -> catalogService.loadNavigation(normalizedSelectedImport.id, "")
+                else -> emptyList()
+            }
         } else {
-            catalogService.loadNavigation(normalizedSelectedImport!!.id, "")
+            when (effectiveSearchScope) {
+                EffectiveSearchScope.GLOBAL -> catalogService.searchNavigation(searchKeyword)
+                is EffectiveSearchScope.IMPORTS -> catalogService.searchNavigation(
+                    keyword = searchKeyword,
+                    importIds = effectiveSearchScope.importIds,
+                )
+
+                is EffectiveSearchScope.TABLE -> catalogService.searchNavigation(
+                    keyword = searchKeyword,
+                    tableId = effectiveSearchScope.tableId,
+                )
+            }
         }
         if (navigationItems.isEmpty()) {
             return ViewSnapshot(
@@ -395,16 +456,20 @@ class MainController(
                 tableViewData = null,
                 highlightedColumnId = "",
                 emptyStatusText = if (searchKeyword.isBlank()) {
-                    "文件 ${normalizedSelectedImport!!.fileName} 中没有可展示的表。"
+                    if (normalizedScopedImportIds.size > 1) {
+                        "当前分组中没有可展示的表。"
+                    } else {
+                        "文件 ${normalizedSelectedImport!!.fileName} 中没有可展示的表。"
+                    }
                 } else {
-                    "未在已导入的 PDM 中找到与“$searchKeyword”匹配的表或字段。"
+                    "未在${describeSearchScope(effectiveSearchScope, imports)}中找到与“$searchKeyword”匹配的表或字段。"
                 },
             )
         }
 
         val preferredItem = preferredTableId?.let { tableId ->
             navigationItems.firstOrNull { it.tableId == tableId }
-        } ?: if (isGlobalSearch && normalizedSelectedImport != null) {
+        } ?: if (searchKeyword.isNotBlank() && normalizedSelectedImport != null) {
             navigationItems.firstOrNull { it.importId == normalizedSelectedImport.id }
         } else {
             navigationItems.firstOrNull()
@@ -419,9 +484,13 @@ class MainController(
                 tableViewData = null,
                 highlightedColumnId = "",
                 emptyStatusText = if (searchKeyword.isBlank()) {
-                    "文件 ${normalizedSelectedImport!!.fileName} 中没有可展示的表。"
+                    if (normalizedScopedImportIds.size > 1) {
+                        "当前分组中没有可展示的表。"
+                    } else {
+                        "文件 ${normalizedSelectedImport!!.fileName} 中没有可展示的表。"
+                    }
                 } else {
-                    "未在已导入的 PDM 中找到与“$searchKeyword”匹配的表或字段。"
+                    "未在${describeSearchScope(effectiveSearchScope, imports)}中找到与“$searchKeyword”匹配的表或字段。"
                 },
             )
         }
@@ -436,6 +505,80 @@ class MainController(
             tableViewData = catalogService.loadTableViewData(preferredItem.tableId),
             highlightedColumnId = preferredItem.matchedColumnIdInPdm.orEmpty(),
             emptyStatusText = "",
+        )
+    }
+
+    private fun resolveEffectiveSearchScope(
+        keyword: String,
+        selectedImport: PdmImportSummary?,
+        scopedImportIds: List<Long>,
+    ): EffectiveSearchScope {
+        if (keyword.isBlank()) {
+            return EffectiveSearchScope.GLOBAL
+        }
+
+        if (searchScopeMode == SearchScopeMode.GLOBAL) {
+            return EffectiveSearchScope.GLOBAL
+        }
+
+        currentTableId?.let { tableId ->
+            return EffectiveSearchScope.TABLE(tableId)
+        }
+
+        if (scopedImportIds.isNotEmpty()) {
+            return EffectiveSearchScope.IMPORTS(scopedImportIds)
+        }
+
+        selectedImport?.let { importSummary ->
+            return EffectiveSearchScope.IMPORTS(listOf(importSummary.id))
+        }
+
+        return EffectiveSearchScope.GLOBAL
+    }
+
+    private fun describeSearchScope(scope: EffectiveSearchScope, imports: List<PdmImportSummary>): String =
+        when (scope) {
+            EffectiveSearchScope.GLOBAL -> "全部已导入的 PDM"
+            is EffectiveSearchScope.IMPORTS -> {
+                if (scope.importIds.size == 1) {
+                    val targetImport = imports.firstOrNull { it.id == scope.importIds.first() }
+                    targetImport?.fileName?.let { "文件 $it" } ?: "当前选中文件"
+                } else {
+                    "当前选中分组"
+                }
+            }
+
+            is EffectiveSearchScope.TABLE -> "当前选中表"
+        }
+
+    private fun buildSearchProgressText(keyword: String): String =
+        if (keyword.isBlank()) {
+            "正在加载表清单..."
+        } else if (searchScopeMode == SearchScopeMode.GLOBAL) {
+            "正在搜索全部已导入 PDM 中的“$keyword”..."
+        } else {
+            "正在搜索当前选中范围中的“$keyword”..."
+        }
+
+    private fun rebuildCurrentView(
+        onError: (Throwable) -> Unit,
+        statusText: String,
+    ) {
+        val importsSnapshot = imports.toList()
+        val selectedImportSnapshot = selectedImport.get()
+        val preferredTableId = currentTableId
+        statusTextProperty.set(statusText)
+        runAsync(onError,
+            action = {
+                buildSnapshot(
+                    imports = importsSnapshot,
+                    selectedImport = selectedImportSnapshot,
+                    searchKeyword = searchKeyword,
+                    preferredTableId = preferredTableId,
+                    emptyStatusText = "当前没有已导入的 PDM 元数据。",
+                )
+            },
+            onSuccess = ::applySnapshot
         )
     }
 
@@ -491,4 +634,12 @@ class MainController(
         val item: TableNavigationItem,
         val tableViewData: PdmTableViewData,
     )
+
+    private sealed interface EffectiveSearchScope {
+        data object GLOBAL : EffectiveSearchScope
+
+        data class IMPORTS(val importIds: List<Long>) : EffectiveSearchScope
+
+        data class TABLE(val tableId: Long) : EffectiveSearchScope
+    }
 }

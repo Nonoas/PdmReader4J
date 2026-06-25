@@ -140,7 +140,16 @@ class PdmRepository(
     }
 
     fun listTableNavigation(importId: Long): List<TableNavigationItem> =
-        databaseFactory.openConnection().use { connection ->
+        listTableNavigation(listOf(importId))
+
+    fun listTableNavigation(importIds: Collection<Long>): List<TableNavigationItem> {
+        val normalizedIds = importIds.distinct()
+        if (normalizedIds.isEmpty()) {
+            return emptyList()
+        }
+
+        val placeholders = normalizedIds.joinToString(",") { "?" }
+        return databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
                 """
                 select i.id as import_id,
@@ -153,11 +162,16 @@ class PdmRepository(
                        t.table_comment
                 from pdm_table t
                 join import_file i on i.id = t.import_file_id
-                where t.import_file_id = ?
-                order by upper(coalesce(t.table_code, t.table_name)), t.id
+                where t.import_file_id in ($placeholders)
+                order by upper(coalesce(i.group_name, '')),
+                         upper(i.file_name),
+                         upper(coalesce(t.table_code, t.table_name)),
+                         t.id
                 """.trimIndent()
             ).use { statement ->
-                statement.setLong(1, importId)
+                normalizedIds.forEachIndexed { index, importId ->
+                    statement.setLong(index + 1, importId)
+                }
                 statement.executeQuery().use { resultSet ->
                     buildList {
                         while (resultSet.next()) {
@@ -179,9 +193,24 @@ class PdmRepository(
                 }
             }
         }
+    }
 
-    fun searchNavigation(keyword: String): List<TableNavigationItem> {
+    fun searchNavigation(
+        keyword: String,
+        importIds: Collection<Long> = emptyList(),
+        tableId: Long? = null,
+    ): List<TableNavigationItem> {
         val likeKeyword = "%${keyword.trim().lowercase()}%"
+        val normalizedImportIds = importIds.distinct()
+        val scopeClause = when {
+            tableId != null -> " and t.id = ?"
+            normalizedImportIds.isNotEmpty() -> {
+                val placeholders = normalizedImportIds.joinToString(",") { "?" }
+                " and t.import_file_id in ($placeholders)"
+            }
+
+            else -> ""
+        }
         return databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
                 """
@@ -202,7 +231,7 @@ class PdmRepository(
                            cast(null as varchar(255)) as column_code
                     from pdm_table t
                     join import_file i on i.id = t.import_file_id
-                    where lower(coalesce(t.table_name, '')) like ? or lower(coalesce(t.table_code, '')) like ?
+                    where (lower(coalesce(t.table_name, '')) like ? or lower(coalesce(t.table_code, '')) like ?)$scopeClause
 
                     union all
 
@@ -222,7 +251,7 @@ class PdmRepository(
                     from pdm_column c
                     join pdm_table t on t.id = c.table_id
                     join import_file i on i.id = t.import_file_id
-                    where lower(coalesce(c.column_name, '')) like ? or lower(coalesce(c.column_code, '')) like ?
+                    where (lower(coalesce(c.column_name, '')) like ? or lower(coalesce(c.column_code, '')) like ?)$scopeClause
                 ) result
                 order by sort_order,
                          upper(coalesce(group_name, '')),
@@ -231,10 +260,13 @@ class PdmRepository(
                          upper(coalesce(column_code, column_name))
                 """.trimIndent()
             ).use { statement ->
-                statement.setString(1, likeKeyword)
-                statement.setString(2, likeKeyword)
-                statement.setString(3, likeKeyword)
-                statement.setString(4, likeKeyword)
+                var parameterIndex = 1
+                statement.setString(parameterIndex++, likeKeyword)
+                statement.setString(parameterIndex++, likeKeyword)
+                parameterIndex = bindSearchScopeParameters(statement, parameterIndex, normalizedImportIds, tableId)
+                statement.setString(parameterIndex++, likeKeyword)
+                statement.setString(parameterIndex++, likeKeyword)
+                bindSearchScopeParameters(statement, parameterIndex, normalizedImportIds, tableId)
                 statement.executeQuery().use { resultSet ->
                     buildList {
                         while (resultSet.next()) {
@@ -263,6 +295,22 @@ class PdmRepository(
                 }
             }
         }
+    }
+
+    private fun bindSearchScopeParameters(
+        statement: java.sql.PreparedStatement,
+        startIndex: Int,
+        importIds: List<Long>,
+        tableId: Long?,
+    ): Int {
+        var parameterIndex = startIndex
+        when {
+            tableId != null -> statement.setLong(parameterIndex++, tableId)
+            importIds.isNotEmpty() -> importIds.forEach { importId ->
+                statement.setLong(parameterIndex++, importId)
+            }
+        }
+        return parameterIndex
     }
 
     fun findTableDetails(tableId: Long): PdmTableDetails? =

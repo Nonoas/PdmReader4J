@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(./gradlew compileKotlin)",
-      "Bash(./gradlew dependencies:*)"
+      "Bash(./gradlew dependencies:*)",
+      "Bash(./gradlew compileKotlin --info)"
     ]
   }
 }

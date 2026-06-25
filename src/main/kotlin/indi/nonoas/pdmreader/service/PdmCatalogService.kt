@@ -38,12 +38,23 @@ class PdmCatalogService(
         return if (normalizedKeyword.isEmpty()) {
             repository.listTableNavigation(importId)
         } else {
-            repository.searchNavigation(normalizedKeyword)
+            repository.searchNavigation(normalizedKeyword, importIds = listOf(importId))
         }
     }
 
-    fun searchNavigation(keyword: String): List<TableNavigationItem> =
-        repository.searchNavigation(keyword.trim())
+    fun loadNavigation(importIds: Collection<Long>): List<TableNavigationItem> =
+        repository.listTableNavigation(importIds)
+
+    fun searchNavigation(
+        keyword: String,
+        importIds: Collection<Long> = emptyList(),
+        tableId: Long? = null,
+    ): List<TableNavigationItem> =
+        repository.searchNavigation(
+            keyword = keyword.trim(),
+            importIds = importIds,
+            tableId = tableId,
+        )
 
     fun loadTableViewData(tableId: Long): PdmTableViewData {
         val details = repository.findTableDetails(tableId)

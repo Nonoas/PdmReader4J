@@ -115,18 +115,6 @@
 /*    -fx-text-fill: -app-text-muted;*/
 /*}*/
 
-/*.toolbar-combo {*/
-/*    -fx-padding: 2 8 2 10;*/
-/*}*/
-
-/*.toolbar-combo > .arrow-button {*/
-/*    -fx-background-color: transparent;*/
-/*    -fx-padding: 0 2 0 4;*/
-/*}*/
-
-/*.toolbar-combo > .arrow-button > .arrow {*/
-/*    -fx-background-color: -app-text-muted;*/
-/*}*/
 
 .sidebar-panel {
     -fx-padding: 0 6 0 0

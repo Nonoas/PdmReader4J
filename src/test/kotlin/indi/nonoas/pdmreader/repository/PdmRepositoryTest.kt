@@ -52,6 +52,10 @@ class PdmRepositoryTest {
         assertTrue(searchByColumn.all { it.matchedColumnCode == "NAME" })
         assertEquals(setOf(secondImport.id, thirdImport.id), searchByColumn.map { it.importId }.toSet())
 
+        val scopedSearchByImport = service.searchNavigation("name", importIds = listOf(secondImport.id))
+        assertEquals(1, scopedSearchByImport.size)
+        assertEquals(secondImport.id, scopedSearchByImport.single().importId)
+
         val tableViewData = service.loadTableViewData(tables.single().tableId)
         assertEquals(2, tableViewData.details.columns.size)
         assertTrue(tableViewData.ddl.contains("PRIMARY KEY (ID)"))
@@ -59,9 +63,18 @@ class PdmRepositoryTest {
         assertEquals(importedFile.toAbsolutePath().toString(), tableViewData.details.importFilePath)
         assertTrue(firstImport.id != secondImport.id)
 
-        assertEquals(2, service.renameImportGroup(listOf(secondImport.id, thirdImport.id), "核心模型"))
+        assertEquals(1, service.renameImportGroup(listOf(secondImport.id), "核心模型-A"))
+        assertEquals(1, service.renameImportGroup(listOf(thirdImport.id), "核心模型-B"))
         val renamedImports = service.listImports()
-        assertTrue(renamedImports.all { it.groupName == "核心模型" })
+        assertEquals(setOf("核心模型-A", "核心模型-B"), renamedImports.map { it.groupName }.toSet())
+
+        val groupNavigation = service.loadNavigation(listOf(secondImport.id, thirdImport.id))
+        assertEquals(2, groupNavigation.size)
+        assertEquals(setOf(secondImport.id, thirdImport.id), groupNavigation.map { it.importId }.toSet())
+
+        val searchByTableScope = service.searchNavigation("sample", tableId = tables.single().tableId)
+        assertEquals(1, searchByTableScope.size)
+        assertEquals(tables.single().tableId, searchByTableScope.single().tableId)
 
         assertEquals(2, service.deleteImports(listOf(secondImport.id, thirdImport.id)))
         assertTrue(service.listImports().isEmpty())

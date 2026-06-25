@@ -8,18 +8,19 @@ import indi.nonoas.pdmreader.app.AppThemeManager
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.model.NavigationItemType
 import indi.nonoas.pdmreader.model.PdmImportSummary
+import indi.nonoas.pdmreader.model.SearchScopeMode
 import indi.nonoas.pdmreader.model.TableNavigationItem
 import indi.nonoas.pdmreader.service.PdmCatalogService
 import javafx.application.Platform
 import javafx.beans.binding.Bindings
 import javafx.beans.property.ReadOnlyObjectProperty
 import javafx.beans.property.ReadOnlyObjectWrapper
+import javafx.beans.property.SimpleStringProperty
 import javafx.collections.ListChangeListener
 import javafx.geometry.Insets
 import javafx.geometry.Orientation
 import javafx.geometry.Pos
 import javafx.scene.control.*
-import javafx.scene.input.MouseButton
 import javafx.scene.layout.*
 import javafx.stage.FileChooser
 import javafx.stage.Stage
@@ -43,6 +44,8 @@ class MainView(
 ) {
     private val logger = LoggerFactory.getLogger(MainView::class.java)
 
+    private val selectionContextProperty = SimpleStringProperty("未选中")
+
     companion object {
         const val APP_VERSION = "0.0.1"
         const val GITHUB_REPO = "Nonoas/PdmReader4J"
@@ -58,6 +61,38 @@ class MainView(
                 controller.setSearchKeyword(newValue, ::showError)
             }
             HBox.setHgrow(this, Priority.ALWAYS)
+        }
+        val searchScopeComboBox = ComboBox<SearchScopeMode>().apply {
+            items.addAll(SearchScopeMode.CURRENT_SELECTION, SearchScopeMode.GLOBAL)
+            value = SearchScopeMode.CURRENT_SELECTION
+            converter = object : StringConverter<SearchScopeMode>() {
+                override fun toString(scope: SearchScopeMode?): String = when (scope) {
+                    SearchScopeMode.CURRENT_SELECTION -> "当前选中范围"
+                    SearchScopeMode.GLOBAL -> "全局"
+                    null -> ""
+                }
+
+                override fun fromString(text: String?): SearchScopeMode? =
+                    items.firstOrNull { toString(it) == text }
+            }
+            setButtonCell(object : ListCell<SearchScopeMode>() {
+                init {
+                    textProperty().bind(Bindings.createStringBinding({
+                        val currentItem: SearchScopeMode? = item
+                        when (currentItem) {
+                            SearchScopeMode.CURRENT_SELECTION -> selectionContextProperty.get()
+                            SearchScopeMode.GLOBAL -> "全局"
+                            null -> ""
+                        }
+                    }, selectionContextProperty, itemProperty()))
+                }
+            })
+            prefWidth = 110.0
+            styleClass.add("toolbar-combo")
+            tooltip = Tooltip("当前选中支持分组、单个 PDM 文件和表；全局会搜索全部已导入内容")
+            selectionModel.selectedItemProperty().addListener { _, _, newValue ->
+                newValue?.let { controller.setSearchScopeMode(it, ::showError) }
+            }
         }
 
         val importButton = Button("导入 PDM").apply {
@@ -92,12 +127,21 @@ class MainView(
             }
         }
         val themeSwitcher = createThemeSwitcher()
+        val searchScopeSwitcher = HBox(
+            6.0,
+            Label("范围").apply { styleClass.add("field-label") },
+            searchScopeComboBox,
+        ).apply {
+            alignment = Pos.CENTER_LEFT
+            styleClass.add("toolbar-group")
+        }
 
         val toolbar = HBox(
             8.0,
             importButton,
             refreshButton,
             copyDdlButton,
+            searchScopeSwitcher,
             searchField,
             clearSearchButton,
             themeSwitcher,
@@ -153,8 +197,8 @@ class MainView(
             }
         })
 
-        val importTreePane = createImportTreePane()
-        val navigationListView = createNavigationListView(tableTabPane)
+        val importTreePane = ImportTreePane(controller, ::showError, selectionContextProperty::set)
+        val navigationListView = createNavigationListView(tableTabPane, importTreePane)
 
         val rightPane = StackPane(
             tableTabPane,
@@ -297,129 +341,13 @@ class MainView(
         }
     }
 
-    private fun createImportTreePane(): Region {
-        val treeView = TreeView<ImportTreeNode>().apply {
-            isShowRoot = false
-            selectionModel.selectionMode = SelectionMode.MULTIPLE
-            styleClass.add("compact-tree")
-            cellFactory = Callback {
-                object : TreeCell<ImportTreeNode>() {
-                    private val titleLabel = Label().apply { styleClass.add("list-item-title") }
-                    private val metaLabel = Label().apply {
-                        styleClass.add("list-item-meta")
-                        isWrapText = true
-                    }
-                    private val contentBox = HBox(2.0, titleLabel, metaLabel)
-                    private val removeMenuItem = MenuItem("移除选中 PDM").apply {
-                        styleClass.add(Styles.DANGER)
-                        setOnAction {
-                            val selectedImports = collectSelectedImports(treeView)
-                            if (selectedImports.isNotEmpty() && confirmRemoveImports(selectedImports)) {
-                                controller.removeImports(selectedImports, ::showError)
-                            }
-                        }
-                    }
-                    private val renameGroupMenuItem = MenuItem("重命名分组").apply {
-                        setOnAction {
-                            val groupNode = treeItem?.value as? ImportTreeNode.Group ?: return@setOnAction
-                            val renamedGroupName = promptGroupName(
-                                initialGroupName = groupNode.displayName,
-                                sourceDescription = groupNode.locationSummary,
-                            ) ?: return@setOnAction
-                            controller.renameImportGroup(groupNode.imports, renamedGroupName, ::showError)
-                        }
-                    }
-                    private val importContextMenu = ContextMenu(removeMenuItem)
-                    private val groupContextMenu = ContextMenu(
-                        renameGroupMenuItem,
-                        SeparatorMenuItem(),
-                        removeMenuItem,
-                    )
-
-                    init {
-                        contentDisplay = ContentDisplay.GRAPHIC_ONLY
-                        setOnMousePressed { event ->
-                            if (event.button == MouseButton.SECONDARY && !isEmpty && treeItem != null) {
-                                if (!treeView.selectionModel.isSelected(index)) {
-                                    treeView.selectionModel.clearAndSelect(index)
-                                }
-                            }
-                        }
-                    }
-
-                    override fun updateItem(item: ImportTreeNode?, empty: Boolean) {
-                        super.updateItem(item, empty)
-
-                        if (empty || item == null) {
-                            text = null
-                            graphic = null
-                            contextMenu = null
-                            return
-                        }
-
-                        when (item) {
-                            is ImportTreeNode.Group -> {
-                                titleLabel.text = item.displayName
-                                metaLabel.text = "${item.locationSummary} · ${item.importCount} 个 PDM"
-                                contextMenu = groupContextMenu
-                            }
-
-                            is ImportTreeNode.Import -> {
-                                titleLabel.text = item.summary.modelName.ifBlank { item.summary.fileName }
-                                metaLabel.text = buildString {
-                                    append(item.summary.fileName)
-                                }
-                                contextMenu = importContextMenu
-                            }
-
-                            ImportTreeNode.Root -> {
-                                text = null
-                                graphic = null
-                                contextMenu = null
-                                return
-                            }
-                        }
-                        if (graphic !== contentBox) {
-                            graphic = contentBox
-                        }
-                    }
-                }
-            }
-        }
-
-        treeView.selectionModel.selectedItemProperty().addListener { _, _, newValue ->
-            val importNode = newValue?.value as? ImportTreeNode.Import ?: return@addListener
-            val selectedImport = importNode.summary
-            if (controller.selectedImportProperty().value == selectedImport) {
-                return@addListener
-            }
-            controller.selectImport(selectedImport, ::showError)
-        }
-
-        controller.imports.addListener(ListChangeListener<PdmImportSummary> {
-            rebuildImportTree(treeView)
-        })
-        controller.selectedImportProperty().addListener { _, _, newValue ->
-            selectImportTreeNode(treeView, newValue?.id)
-        }
-
-        rebuildImportTree(treeView)
-
-        return StackPane(
-            treeView,
-            Label("尚未导入任何 PDM 文件").apply {
-                styleClass.add("tree-placeholder")
-                isMouseTransparent = true
-                visibleProperty().bind(Bindings.isEmpty(controller.imports))
-                managedProperty().bind(visibleProperty())
-            },
-        )
-    }
-
-    private fun createNavigationListView(tableTabPane: TabPane): ListView<TableNavigationItem> =
+    private fun createNavigationListView(
+        tableTabPane: TabPane,
+        importTreePane: ImportTreePane,
+    ): ListView<TableNavigationItem> =
         ListView(controller.navigationItems).apply {
             selectionModel.selectionMode = SelectionMode.SINGLE
-            placeholder = Label("选择导入文件后显示表清单，输入关键字后可搜索全部已导入的 PDM")
+            placeholder = Label("选择分组或文件后显示表清单，输入关键字后可按当前选中范围或全局搜索")
             styleClass.addAll("compact-list", "navigation-list")
             cellFactory = Callback {
                 object : ListCell<TableNavigationItem>() {
@@ -506,10 +434,15 @@ class MainView(
                 if (controller.selectedNavigationItemProperty().value == newValue) {
                     return@addListener
                 }
-                controller.selectNavigationItem(newValue, ::showError)
                 if (newValue != null) {
+                    val tableCode = newValue.tableCode?.takeIf { it.isNotBlank() } ?: newValue.tableName
+                    selectionContextProperty.set(tableCode)
                     openTableTab(tableTabPane, newValue)
+                } else {
+                    // 还原为树选中的上下文
+                    selectionContextProperty.set(importTreePane.currentSelectionContextText())
                 }
+                controller.selectNavigationItem(newValue, ::showError)
             }
             bindSelection(controller.selectedNavigationItemProperty())
         }
@@ -535,80 +468,6 @@ class MainView(
         }
     }
 
-    private fun rebuildImportTree(treeView: TreeView<ImportTreeNode>) {
-        val root = TreeItem<ImportTreeNode>(ImportTreeNode.Root).apply {
-            isExpanded = true
-        }
-
-        val groupedImports = controller.imports
-            .groupBy { importSummary -> importSummary.groupName.trim().ifBlank { "未分组" } }
-            .entries
-            .sortedWith(compareBy({ groupEntry ->
-                groupEntry.key.lowercase()
-            }))
-
-        groupedImports.forEach { (groupName, imports) ->
-            val groupItem = TreeItem<ImportTreeNode>(
-                ImportTreeNode.Group(
-                    displayName = groupName,
-                    imports = imports,
-                    locationSummary = buildGroupLocationSummary(imports),
-                )
-            ).apply {
-                isExpanded = true
-            }
-            imports.forEach { importSummary ->
-                groupItem.children.add(TreeItem<ImportTreeNode>(ImportTreeNode.Import(importSummary)))
-            }
-            root.children.add(groupItem)
-        }
-
-        treeView.root = root
-        selectImportTreeNode(treeView, controller.selectedImportProperty().value?.id)
-    }
-
-    private fun selectImportTreeNode(treeView: TreeView<ImportTreeNode>, importId: Long?) {
-        if (importId == null) {
-            treeView.selectionModel.clearSelection()
-            return
-        }
-
-        val targetItem = treeView.root?.children
-            ?.asSequence()
-            ?.flatMap { groupItem -> groupItem.children.asSequence() }
-            ?.firstOrNull { treeItem ->
-                (treeItem.value as? ImportTreeNode.Import)?.summary?.id == importId
-            }
-
-        if (targetItem == null) {
-            treeView.selectionModel.clearSelection()
-            return
-        }
-
-        treeView.selectionModel.clearSelection()
-        treeView.selectionModel.select(targetItem)
-    }
-
-    private fun collectSelectedImports(treeView: TreeView<ImportTreeNode>): List<PdmImportSummary> =
-        treeView.selectionModel.selectedItems
-            .toList()
-            .ifEmpty { listOfNotNull(treeView.selectionModel.selectedItem) }
-            .flatMap(::collectImportsFromTreeItem)
-            .distinctBy { it.id }
-
-    private fun collectImportsFromTreeItem(treeItem: TreeItem<ImportTreeNode>?): List<PdmImportSummary> {
-        if (treeItem == null) {
-            return emptyList()
-        }
-
-        return when (val node = treeItem.value) {
-            is ImportTreeNode.Import -> listOf(node.summary)
-            is ImportTreeNode.Group -> treeItem.children.flatMap(::collectImportsFromTreeItem)
-            ImportTreeNode.Root,
-            null -> emptyList()
-        }
-    }
-
     private fun choosePdmFiles(): List<File> =
         FileChooser().apply {
             title = "选择 PowerDesigner PDM 文件"
@@ -617,64 +476,6 @@ class MainView(
             )
             initialDirectory = defaultInitialDirectory()
         }.showOpenMultipleDialog(stage).orEmpty()
-
-    private fun confirmRemoveImport(importSummary: PdmImportSummary): Boolean =
-        DialogWithIcon.confirm(
-            "确认移除",
-            "确认移除已导入的 PDM 吗？\n${importSummary.modelName}\n${importSummary.fileName}"
-        )
-
-    private fun confirmRemoveImports(importSummaries: List<PdmImportSummary>): Boolean {
-        val targets = importSummaries.distinctBy { it.id }
-        if (targets.size == 1) {
-            return confirmRemoveImport(targets.first())
-        }
-
-        val preview = targets.take(8).joinToString("\n") { "• ${it.fileName}" } +
-                if (targets.size > 8) "\n• ..." else ""
-        return DialogWithIcon.confirm(
-            "确认移除",
-            "确认移除选中的 ${targets.size} 个 PDM 吗？\n$preview"
-        )
-    }
-
-    private fun promptGroupName(initialGroupName: String, sourceDescription: String): String? {
-        while (true) {
-            val result = DialogWithIcon.textInput(
-                title = "重命名分组",
-                headerText = "来源：$sourceDescription",
-                defaultValue = initialGroupName,
-            )
-            if (result.isEmpty) {
-                return null
-            }
-
-            val groupName = result.get().trim()
-            if (groupName.isNotEmpty()) {
-                return groupName
-            }
-
-            DialogWithIcon.warning("分组名称无效", "分组名称不能为空。")
-        }
-    }
-
-    private fun buildGroupLocationSummary(imports: List<PdmImportSummary>): String {
-        val directories = imports.mapNotNull { importSummary ->
-            runCatching {
-                Path.of(importSummary.filePath)
-                    .parent
-                    ?.normalize()
-                    ?.toString()
-                    ?.takeIf { it.isNotBlank() }
-            }.getOrNull()
-        }.distinct()
-
-        return when (directories.size) {
-            0 -> "未知目录"
-            1 -> directories.first()
-            else -> "${directories.size} 个来源目录"
-        }
-    }
 
     private fun defaultInitialDirectory(): File {
         val sampleDirectory = Path.of(
@@ -1008,22 +809,5 @@ class MainView(
         "dark" -> "深色"
         "claude" -> "Claude"
         else -> name.ifBlank { "未命名主题" }
-    }
-
-    private sealed interface ImportTreeNode {
-        data object Root : ImportTreeNode
-
-        data class Group(
-            val displayName: String,
-            val imports: List<PdmImportSummary>,
-            val locationSummary: String,
-        ) : ImportTreeNode {
-            val importCount: Int
-                get() = imports.size
-        }
-
-        data class Import(
-            val summary: PdmImportSummary,
-        ) : ImportTreeNode
     }
 }

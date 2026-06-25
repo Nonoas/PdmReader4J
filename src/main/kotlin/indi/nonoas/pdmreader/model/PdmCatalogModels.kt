@@ -17,6 +17,11 @@ enum class NavigationItemType {
     COLUMN_MATCH,
 }
 
+enum class SearchScopeMode {
+    CURRENT_SELECTION,
+    GLOBAL,
+}
+
 data class TableNavigationItem(
     val type: NavigationItemType,
     val importId: Long,
