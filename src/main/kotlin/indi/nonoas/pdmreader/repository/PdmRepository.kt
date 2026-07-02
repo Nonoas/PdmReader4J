@@ -16,14 +16,24 @@ class PdmRepository(
         initializeSchema()
     }
 
-    fun replaceImport(filePath: Path, fileHash: String, parsedModel: ParsedPdmModel): PdmImportSummary {
+    fun replaceImport(
+        filePath: Path,
+        fileHash: String,
+        parsedModel: ParsedPdmModel,
+        groupName: String? = null,
+    ): PdmImportSummary {
         logger.info("Persisting PDM metadata for: $filePath")
         databaseFactory.openConnection().use { connection ->
             connection.autoCommit = false
             try {
-                deleteExistingImport(connection, filePath.toAbsolutePath().toString())
+                val absoluteFilePath = filePath.toAbsolutePath().toString()
+                val resolvedGroupName = groupName
+                    ?.takeIf { it.isNotBlank() }
+                    ?: findImportGroupName(connection, absoluteFilePath)
+                    ?: defaultGroupName(absoluteFilePath)
+                deleteExistingImport(connection, absoluteFilePath)
 
-                val importId = insertImport(connection, filePath, fileHash, parsedModel)
+                val importId = insertImport(connection, filePath, fileHash, parsedModel, resolvedGroupName)
                 parsedModel.tables.forEach { table ->
                     val tableId = insertTable(connection, importId, table)
                     table.columns.forEach { column ->
@@ -47,13 +57,40 @@ class PdmRepository(
         }
     }
 
+    fun listRefreshCandidates(): List<PdmImportRefreshCandidate> =
+        databaseFactory.openConnection().use { connection ->
+            connection.prepareStatement(
+                """
+                select id, file_path, file_name, group_name, file_hash
+                from import_file
+                order by file_name
+                """.trimIndent()
+            ).use { statement ->
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            add(
+                                PdmImportRefreshCandidate(
+                                    id = resultSet.getLong("id"),
+                                    filePath = resultSet.getString("file_path"),
+                                    fileName = resultSet.getString("file_name"),
+                                    groupName = resultSet.normalizedGroupName(),
+                                    fileHash = resultSet.getString("file_hash"),
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
     fun listImports(): List<PdmImportSummary> =
         databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
                 """
                 select id, file_path, file_name, group_name, model_name, target_db, import_time
                 from import_file
-                order by import_time desc, id desc
+                order by file_name
                 """.trimIndent()
             ).use { statement ->
                 statement.executeQuery().use { resultSet ->
@@ -428,11 +465,26 @@ class PdmRepository(
         }
     }
 
+    private fun findImportGroupName(connection: Connection, filePath: String): String? =
+        connection.prepareStatement(
+            """
+            select group_name
+            from import_file
+            where file_path = ?
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, filePath)
+            statement.executeQuery().use { resultSet ->
+                if (resultSet.next()) resultSet.getString("group_name") else null
+            }
+        }
+
     private fun insertImport(
         connection: Connection,
         filePath: Path,
         fileHash: String,
         parsedModel: ParsedPdmModel,
+        groupName: String,
     ): Long =
         connection.prepareStatement(
             """
@@ -450,7 +502,7 @@ class PdmRepository(
         ).use { statement ->
             statement.setString(1, filePath.toAbsolutePath().toString())
             statement.setString(2, filePath.fileName.toString())
-            statement.setString(3, defaultGroupName(filePath.toAbsolutePath().toString()))
+            statement.setString(3, groupName)
             statement.setString(4, fileHash)
             statement.setString(5, parsedModel.modelName)
             statement.setString(6, parsedModel.targetDb)

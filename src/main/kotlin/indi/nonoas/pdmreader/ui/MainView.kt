@@ -45,6 +45,7 @@ class MainView(
     private val logger = LoggerFactory.getLogger(MainView::class.java)
 
     private val selectionContextProperty = SimpleStringProperty("未选中")
+    private var importProgressDialog: Alert? = null
 
     companion object {
         const val APP_VERSION = "0.0.1"
@@ -75,7 +76,7 @@ class MainView(
                 override fun fromString(text: String?): SearchScopeMode? =
                     items.firstOrNull { toString(it) == text }
             }
-            setButtonCell(object : ListCell<SearchScopeMode>() {
+            buttonCell = object : ListCell<SearchScopeMode>() {
                 init {
                     textProperty().bind(Bindings.createStringBinding({
                         val currentItem: SearchScopeMode? = item
@@ -86,7 +87,7 @@ class MainView(
                         }
                     }, selectionContextProperty, itemProperty()))
                 }
-            })
+            }
             prefWidth = 110.0
             styleClass.add("toolbar-combo")
             tooltip = Tooltip("当前选中支持分组、单个 PDM 文件和表；全局会搜索全部已导入内容")
@@ -252,6 +253,7 @@ class MainView(
             styleClass.add("app-shell")
         }
 
+        installImportProgressDialog()
         controller.initialize(::showError)
         return root
     }
@@ -490,6 +492,60 @@ class MainView(
     private fun showError(exception: Throwable) {
         logger.error(exception.message, exception)
         DialogWithIcon.error("执行失败", exception.message ?: "未知错误")
+    }
+
+    private fun installImportProgressDialog() {
+        controller.importProgressVisibleProperty.addListener { _, _, visible ->
+            if (visible) {
+                showImportProgressDialog()
+            } else {
+                closeImportProgressDialog()
+            }
+        }
+    }
+
+    private fun showImportProgressDialog() {
+        if (importProgressDialog != null) {
+            return
+        }
+
+        val progressBar = ProgressBar().apply {
+            prefWidth = 360.0
+            progressProperty().bind(controller.importProgressValueProperty)
+        }
+        val progressLabel = Label().apply {
+            textProperty().bind(controller.importProgressTextProperty)
+            maxWidth = 360.0
+            isWrapText = true
+        }
+        val content = VBox(10.0, progressLabel, progressBar).apply {
+            padding = Insets(16.0, 4.0, 4.0, 4.0)
+        }
+
+        importProgressDialog = Alert(Alert.AlertType.INFORMATION).apply {
+            title = "同步 PDM"
+            headerText = "正在校验并导入 PDM 文件"
+            dialogPane.content = content
+            dialogPane.buttonTypes.setAll(ButtonType.CLOSE)
+            isResizable = true
+            initOwner(stage)
+            setOnHidden { importProgressDialog = null }
+            show()
+        }
+    }
+
+    private fun closeImportProgressDialog() {
+        importProgressDialog?.dialogPane?.content?.let { content ->
+            (content as? VBox)?.children?.forEach { node ->
+                when (node) {
+                    is Label -> node.textProperty().unbind()
+                    is ProgressBar -> node.progressProperty().unbind()
+                    else -> Unit
+                }
+            }
+        }
+        importProgressDialog?.close()
+        importProgressDialog = null
     }
 
     private fun showAboutDialog() {

@@ -306,55 +306,16 @@
 }
 
 .navigation-list .list-cell:filled:hover .list-item-box {
-    -fx-background-color: derive(-color-bg-default, 3%);
-    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.06), 8, 0.25, 0, 2);
+    -fx-background-color: derive(-color-cell-bg-selected, 3%);
 }
 
 .navigation-list .list-cell:filled:selected .list-item-box {
-    -fx-background-color: -color-accent-muted;
-    -fx-border-color: -color-accent-emphasis;
+    -fx-background-color: -color-cell-bg-selected;
 }
-
-/*.data-table .column-header-background {*/
-/*    -fx-background-color: -app-surface-alt;*/
-/*    -fx-background-radius: 14 14 0 0;*/
-/*}*/
-
-/*.data-table .column-header,*/
-/*.data-table .filler {*/
-/*    -fx-background-color: transparent;*/
-/*    -fx-border-color: transparent transparent -app-border transparent;*/
-/*    -fx-border-width: 0 0 1 0;*/
-/*}*/
-
-/*.data-table .column-header .label {*/
-/*    -fx-font-size: 11px;*/
-/*    -fx-font-weight: 800;*/
-/*    -fx-text-fill: -app-text-muted;*/
-/*    -fx-padding: 0 2 0 2;*/
-/*}*/
 
 .table-row-cell {
     -fx-border-width: 0 0 1 0;
 }
-
-/*.table-cell {*/
-/*    -fx-border-color: transparent;*/
-/*    -fx-padding: 0 10 0 10;*/
-/*    -fx-font-size: 12px;*/
-/*    -fx-text-fill: -app-text;*/
-/*    -fx-alignment: center-left;*/
-/*}*/
-
-/*.text-area .content {*/
-/*    -fx-background-color: transparent;*/
-/*    -fx-background-radius: 10;*/
-/*}*/
-
-/*.code-area {*/
-/*    -fx-font-family: "JetBrains Mono", "Consolas", monospace;*/
-/*    -fx-font-size: 12px;*/
-/*}*/
 
 .status-bar {
     -fx-border-width: 1 0 0 0;

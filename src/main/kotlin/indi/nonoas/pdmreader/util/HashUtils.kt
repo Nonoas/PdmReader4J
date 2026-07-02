@@ -5,8 +5,14 @@ import java.nio.file.Path
 import java.security.MessageDigest
 
 object HashUtils {
+    fun md5(path: Path): String = digest(path, "MD5")
+
     fun sha256(path: Path): String {
-        val digest = MessageDigest.getInstance("SHA-256")
+        return digest(path, "SHA-256")
+    }
+
+    private fun digest(path: Path, algorithm: String): String {
+        val digest = MessageDigest.getInstance(algorithm)
         Files.newInputStream(path).use { input ->
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             while (true) {

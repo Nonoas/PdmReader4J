@@ -3,9 +3,11 @@ package indi.nonoas.pdmreader.controller
 import github.nonoas.jfx.flat.ui.concurrent.TaskHandler
 import indi.nonoas.pdmreader.model.*
 import indi.nonoas.pdmreader.service.PdmCatalogService
+import javafx.application.Platform
 import javafx.beans.property.*
 import javafx.collections.FXCollections
 import javafx.collections.ObservableList
+import javafx.scene.control.ProgressIndicator
 import javafx.scene.input.Clipboard
 import javafx.scene.input.ClipboardContent
 import java.nio.file.Path
@@ -26,6 +28,9 @@ class MainController(
     val selectedTableCommentProperty: StringProperty = SimpleStringProperty("")
     val ddlTextProperty: StringProperty = SimpleStringProperty("")
     val highlightedColumnIdProperty: StringProperty = SimpleStringProperty("")
+    val importProgressVisibleProperty: BooleanProperty = SimpleBooleanProperty(false)
+    val importProgressTextProperty: StringProperty = SimpleStringProperty("")
+    val importProgressValueProperty: DoubleProperty = SimpleDoubleProperty(ProgressIndicator.INDETERMINATE_PROGRESS)
 
     private val selectedImport = ReadOnlyObjectWrapper<PdmImportSummary?>()
     private val selectedNavigationItem = ReadOnlyObjectWrapper<TableNavigationItem?>()
@@ -67,6 +72,13 @@ class MainController(
         }
 
         val keyword = searchKeyword
+        beginImportProgress(
+            if (paths.size == 1) {
+                "准备导入 ${paths.first().fileName}..."
+            } else {
+                "准备导入 ${paths.size} 个 PDM 文件..."
+            }
+        )
         statusTextProperty.set(
             if (paths.size == 1) {
                 "正在导入 ${paths.first().fileName}..."
@@ -74,9 +86,15 @@ class MainController(
                 "正在导入 ${paths.size} 个 PDM 文件..."
             }
         )
-        runAsync(onError,
+        runAsync(
+            onError = onError,
             action = {
-                val imported = paths.map(catalogService::importPdm)
+                val imported = paths.mapIndexed { index, path ->
+                    updateImportProgress(index, paths.size, "正在导入 ${path.fileName}...")
+                    catalogService.importPdm(path).also {
+                        updateImportProgress(index + 1, paths.size, "已导入 ${index + 1}/${paths.size}")
+                    }
+                }
                 val preferredImportId = imported.last().id
                 val imports = catalogService.listImports()
                 val targetImport = imports.firstOrNull { it.id == preferredImportId } ?: imports.firstOrNull()
@@ -88,7 +106,10 @@ class MainController(
                     emptyStatusText = "当前没有已导入的 PDM 元数据。",
                 )
             },
-            onSuccess = ::applySnapshot
+            onSuccess = { snapshot ->
+                applySnapshot(snapshot)
+            },
+            onFinished = ::endImportProgress,
         )
     }
 
@@ -195,13 +216,23 @@ class MainController(
     fun reloadImports(preferredImportId: Long? = selectedImport.get()?.id, onError: (Throwable) -> Unit = {}) {
         val keyword = searchKeyword
         val preferredTableId = currentTableId
+        val preferredFilePath = imports.firstOrNull { it.id == preferredImportId }?.filePath
         statusTextProperty.set("正在刷新导入列表...")
-        runAsync(onError,
+        beginImportProgress("正在校验 PDM 文件是否更新...")
+        runAsync(
+            onError = onError,
             action = {
+                val refreshResult = catalogService.refreshChangedImports { completed, total, message ->
+                    updateImportProgress(completed, total, message)
+                }
                 val imports = catalogService.listImports()
-                val targetImport = preferredImportId?.let { importId ->
-                    imports.firstOrNull { it.id == importId }
-                } ?: imports.firstOrNull()
+                val targetImport = preferredImportId
+                    ?.let { importId -> imports.firstOrNull { it.id == importId } }
+                    ?: preferredFilePath?.let { path -> imports.firstOrNull { it.filePath == path } }
+                    ?: refreshResult.reimported.lastOrNull()?.let { reimported ->
+                        imports.firstOrNull { it.filePath == reimported.filePath }
+                    }
+                    ?: imports.firstOrNull()
                 buildSnapshot(
                     imports = imports,
                     selectedImport = targetImport,
@@ -210,7 +241,10 @@ class MainController(
                     emptyStatusText = "当前没有已导入的 PDM 元数据。",
                 )
             },
-            onSuccess = ::applySnapshot
+            onSuccess = { snapshot ->
+                applySnapshot(snapshot)
+            },
+            onFinished = ::endImportProgress,
         )
     }
 
@@ -594,24 +628,56 @@ class MainController(
         }
     }
 
+    private fun beginImportProgress(message: String) {
+        updateImportProgress(0, 0, message)
+        Platform.runLater {
+            importProgressVisibleProperty.set(true)
+        }
+    }
+
+    private fun updateImportProgress(completed: Int, total: Int, message: String) {
+        val progress = if (total <= 0) {
+            ProgressIndicator.INDETERMINATE_PROGRESS
+        } else {
+            completed.toDouble() / total.toDouble()
+        }
+        Platform.runLater {
+            importProgressTextProperty.set(message)
+            importProgressValueProperty.set(progress)
+        }
+    }
+
+    private fun endImportProgress() {
+        Platform.runLater {
+            importProgressVisibleProperty.set(false)
+            importProgressValueProperty.set(ProgressIndicator.INDETERMINATE_PROGRESS)
+            importProgressTextProperty.set("")
+        }
+    }
+
     private fun <T> runAsync(
         onError: (Throwable) -> Unit,
         action: () -> T,
         onSuccess: (T) -> Unit,
+        onFinished: () -> Unit = {},
     ) {
         val requestId = requestSequence.incrementAndGet()
         TaskHandler<Result<T>>()
             .whenCall { runCatching(action) }
             .andThen { result ->
-                if (requestId != requestSequence.get()) {
-                    return@andThen
-                }
-                result
-                    .onSuccess(onSuccess)
-                    .onFailure { exception ->
-                        statusTextProperty.set("执行失败：${exception.message ?: "未知错误"}")
-                        onError(exception)
+                try {
+                    if (requestId != requestSequence.get()) {
+                        return@andThen
                     }
+                    result
+                        .onSuccess(onSuccess)
+                        .onFailure { exception ->
+                            statusTextProperty.set("执行失败：${exception.message ?: "未知错误"}")
+                            onError(exception)
+                        }
+                } finally {
+                    onFinished()
+                }
             }
             .handle()
     }

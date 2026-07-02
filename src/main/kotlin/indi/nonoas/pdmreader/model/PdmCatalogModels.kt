@@ -12,6 +12,19 @@ data class PdmImportSummary(
     val importTime: LocalDateTime,
 )
 
+data class PdmImportRefreshCandidate(
+    val id: Long,
+    val filePath: String,
+    val fileName: String,
+    val groupName: String,
+    val fileHash: String,
+)
+
+data class PdmRefreshResult(
+    val checkedCount: Int,
+    val reimported: List<PdmImportSummary>,
+)
+
 enum class NavigationItemType {
     TABLE,
     COLUMN_MATCH,
