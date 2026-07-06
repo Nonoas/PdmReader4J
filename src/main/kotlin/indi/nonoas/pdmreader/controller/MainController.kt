@@ -303,6 +303,18 @@ class MainController(
     }
 
     fun setSearchKeyword(keyword: String, onError: (Throwable) -> Unit = {}) {
+        updateSearchKeyword(keyword, syncSelectionScope = false, onError = onError)
+    }
+
+    fun clearSearch(onError: (Throwable) -> Unit = {}) {
+        updateSearchKeyword("", syncSelectionScope = true, onError = onError)
+    }
+
+    private fun updateSearchKeyword(
+        keyword: String,
+        syncSelectionScope: Boolean,
+        onError: (Throwable) -> Unit = {},
+    ) {
         searchKeyword = keyword.trim()
         val normalizedKeyword = searchKeyword
         val importsSnapshot = imports.toList()
@@ -317,14 +329,11 @@ class MainController(
                     searchKeyword = normalizedKeyword,
                     preferredTableId = preferredTableId,
                     emptyStatusText = "当前没有已导入的 PDM 元数据。",
+                    syncSelectionScope = syncSelectionScope,
                 )
             },
             onSuccess = ::applySnapshot
         )
-    }
-
-    fun clearSearch(onError: (Throwable) -> Unit = {}) {
-        setSearchKeyword("", onError)
     }
 
     fun selectNavigationItem(item: TableNavigationItem?, onError: (Throwable) -> Unit = {}) {
@@ -373,17 +382,27 @@ class MainController(
         navigationItems.setAll(snapshot.navigationItems)
         selectedNavigationItem.set(snapshot.selectedNavigationItem)
         if (snapshot.tableViewData == null) {
-            clearTableDetails()
+            clearTableDetails(clearCurrentTableSelection = snapshot.syncSelectionScope)
             statusTextProperty.set(snapshot.emptyStatusText)
             return
         }
 
-        applyTableViewData(snapshot.tableViewData, snapshot.highlightedColumnId)
+        applyTableViewData(
+            tableViewData = snapshot.tableViewData,
+            highlightedColumnId = snapshot.highlightedColumnId,
+            syncCurrentTableSelection = snapshot.syncSelectionScope,
+        )
     }
 
-    private fun applyTableViewData(tableViewData: PdmTableViewData, highlightedColumnId: String?) {
+    private fun applyTableViewData(
+        tableViewData: PdmTableViewData,
+        highlightedColumnId: String?,
+        syncCurrentTableSelection: Boolean = true,
+    ) {
         val details = tableViewData.details
-        currentTableId = details.tableId
+        if (syncCurrentTableSelection) {
+            currentTableId = details.tableId
+        }
         columns.setAll(details.columns)
         ddlTextProperty.set(tableViewData.ddl)
         canCopyDdl.set(tableViewData.ddl.isNotBlank())
@@ -410,8 +429,10 @@ class MainController(
         statusTextProperty.set(buildTableStatus(tableViewData))
     }
 
-    private fun clearTableDetails() {
-        currentTableId = null
+    private fun clearTableDetails(clearCurrentTableSelection: Boolean = true) {
+        if (clearCurrentTableSelection) {
+            currentTableId = null
+        }
         columns.clear()
         ddlTextProperty.set("")
         canCopyDdl.set(false)
@@ -427,6 +448,7 @@ class MainController(
         searchKeyword: String,
         preferredTableId: Long?,
         emptyStatusText: String,
+        syncSelectionScope: Boolean = true,
     ): ViewSnapshot {
         if (imports.isEmpty()) {
             return ViewSnapshot(
@@ -437,6 +459,7 @@ class MainController(
                 tableViewData = null,
                 highlightedColumnId = "",
                 emptyStatusText = emptyStatusText,
+                syncSelectionScope = syncSelectionScope,
             )
         }
 
@@ -453,6 +476,7 @@ class MainController(
                 tableViewData = null,
                 highlightedColumnId = "",
                 emptyStatusText = emptyStatusText,
+                syncSelectionScope = syncSelectionScope,
             )
         }
 
@@ -498,6 +522,7 @@ class MainController(
                 } else {
                     "未在${describeSearchScope(effectiveSearchScope, imports)}中找到与“$searchKeyword”匹配的表或字段。"
                 },
+                syncSelectionScope = syncSelectionScope,
             )
         }
 
@@ -526,19 +551,26 @@ class MainController(
                 } else {
                     "未在${describeSearchScope(effectiveSearchScope, imports)}中找到与“$searchKeyword”匹配的表或字段。"
                 },
+                syncSelectionScope = syncSelectionScope,
             )
         }
 
         val resolvedSelectedImport = imports.firstOrNull { it.id == preferredItem.importId } ?: normalizedSelectedImport
+        val snapshotSelectedImport = if (syncSelectionScope) {
+            resolvedSelectedImport
+        } else {
+            normalizedSelectedImport
+        }
 
         return ViewSnapshot(
             imports = imports,
-            selectedImport = resolvedSelectedImport,
+            selectedImport = snapshotSelectedImport,
             navigationItems = navigationItems,
             selectedNavigationItem = preferredItem,
             tableViewData = catalogService.loadTableViewData(preferredItem.tableId),
             highlightedColumnId = preferredItem.matchedColumnIdInPdm.orEmpty(),
             emptyStatusText = "",
+            syncSelectionScope = syncSelectionScope,
         )
     }
 
@@ -694,6 +726,7 @@ class MainController(
         val tableViewData: PdmTableViewData?,
         val highlightedColumnId: String,
         val emptyStatusText: String,
+        val syncSelectionScope: Boolean,
     )
 
     private data class TableSelectionSnapshot(

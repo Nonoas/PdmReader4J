@@ -6,6 +6,7 @@ import indi.nonoas.pdmreader.model.PdmColumnDetail
 import indi.nonoas.pdmreader.model.PdmTableViewData
 import indi.nonoas.pdmreader.model.TableNavigationItem
 import indi.nonoas.pdmreader.service.PdmCatalogService
+import javafx.application.Platform
 import javafx.beans.property.ReadOnlyBooleanProperty
 import javafx.beans.property.SimpleBooleanProperty
 import javafx.beans.property.SimpleStringProperty
@@ -41,6 +42,8 @@ class TableDetailTab(
     private val metaText = SimpleStringProperty("")
     private val commentText = SimpleStringProperty("")
     private val highlightedColumnId = SimpleStringProperty("")
+    private var columnsTable: TableView<PdmColumnDetail>? = null
+    private var detailTabs: TabPane? = null
 
     init {
         text = buildTabTitle()
@@ -104,6 +107,15 @@ class TableDetailTab(
         return true
     }
 
+    fun focusColumn(columnIdInPdm: String?) {
+        if (columnIdInPdm.isNullOrBlank()) {
+            return
+        }
+
+        highlightedColumnId.set(columnIdInPdm)
+        selectHighlightedColumn(columnIdInPdm)
+    }
+
     private fun buildTabTitle(): String =
         item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName.ifBlank { "未命名表" }
 
@@ -142,6 +154,7 @@ class TableDetailTab(
             styleClass.add("content-tabs")
             VBox.setVgrow(this, Priority.ALWAYS)
         }
+        this.detailTabs = detailTabs
 
         return VBox(8.0, headerBox, detailTabs).apply {
             isFillWidth = true
@@ -155,6 +168,7 @@ class TableDetailTab(
             placeholder = Label("选择表后显示字段列表")
             styleClass.add("data-table")
         }
+        columnsTable = table
 
         table.columns += textColumn("序号") { it.ordinalPosition.toString() }.apply {
             prefWidth = 70.0
@@ -213,12 +227,29 @@ class TableDetailTab(
             }
             val index = columns.indexOfFirst { it.idInPdm == newValue }
             if (index >= 0) {
-                table.selectionModel.select(index)
-                table.scrollTo(index)
+                selectHighlightedColumn(newValue)
             }
         }
 
         return table
+    }
+
+    private fun selectHighlightedColumn(columnIdInPdm: String) {
+        val table = columnsTable ?: return
+        val index = columns.indexOfFirst { it.idInPdm == columnIdInPdm }
+        if (index < 0) {
+            return
+        }
+
+        detailTabs?.selectionModel?.select(0)
+        table.selectionModel.clearAndSelect(index)
+        table.focusModel.focus(index)
+        table.scrollTo(index)
+        Platform.runLater {
+            table.selectionModel.clearAndSelect(index)
+            table.focusModel.focus(index)
+            table.scrollTo(index)
+        }
     }
 
     private fun formatRowValues(item: PdmColumnDetail): String = listOf(
@@ -282,8 +313,6 @@ class TableDetailTab(
             }
         )
         commentText.set(details.tableComment ?: "")
-        if (!highlightColumnId.isNullOrBlank()) {
-            highlightedColumnId.set(highlightColumnId)
-        }
+        focusColumn(highlightColumnId)
     }
 }

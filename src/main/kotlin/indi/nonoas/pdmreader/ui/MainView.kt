@@ -7,7 +7,6 @@ import github.nonoas.jfx.flat.ui.theme.Theme
 import indi.nonoas.pdmreader.app.AppThemeManager
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.model.NavigationItemType
-import indi.nonoas.pdmreader.model.PdmImportSummary
 import indi.nonoas.pdmreader.model.SearchScopeMode
 import indi.nonoas.pdmreader.model.TableNavigationItem
 import indi.nonoas.pdmreader.service.PdmCatalogService
@@ -21,6 +20,8 @@ import javafx.geometry.Insets
 import javafx.geometry.Orientation
 import javafx.geometry.Pos
 import javafx.scene.control.*
+import javafx.scene.input.MouseButton
+import javafx.scene.input.MouseEvent
 import javafx.scene.layout.*
 import javafx.stage.FileChooser
 import javafx.stage.Stage
@@ -55,10 +56,14 @@ class MainView(
     }
 
     fun createContent(): BorderPane {
+        var suppressSearchFieldChange = false
         val searchField = TextField().apply {
             promptText = "搜索表名、表编码、字段名或字段编码"
             styleClass.add("search-input")
             textProperty().addListener { _, _, newValue ->
+                if (suppressSearchFieldChange) {
+                    return@addListener
+                }
                 controller.setSearchKeyword(newValue, ::showError)
             }
             HBox.setHgrow(this, Priority.ALWAYS)
@@ -112,11 +117,13 @@ class MainView(
         }
         val clearSearchButton = Button("清空搜索").apply {
             setOnAction {
-                if (searchField.text.isEmpty()) {
-                    controller.clearSearch(::showError)
-                } else {
+                suppressSearchFieldChange = true
+                try {
                     searchField.clear()
+                } finally {
+                    suppressSearchFieldChange = false
                 }
+                controller.clearSearch(::showError)
             }
         }
         val copyDdlButton = Button("复制 DDL").apply {
@@ -186,7 +193,7 @@ class MainView(
         )
 
         // Close tabs for removed PDM imports
-        controller.imports.addListener(ListChangeListener<PdmImportSummary> { change ->
+        controller.imports.addListener(ListChangeListener { change ->
             while (change.next()) {
                 if (change.wasRemoved()) {
                     val removedIds = change.removed.map { it.id }.toSet()
@@ -348,6 +355,7 @@ class MainView(
         importTreePane: ImportTreePane,
     ): ListView<TableNavigationItem> =
         ListView(controller.navigationItems).apply {
+            val applyingControllerSelection = booleanArrayOf(false)
             selectionModel.selectionMode = SelectionMode.SINGLE
             placeholder = Label("选择分组或文件后显示表清单，输入关键字后可按当前选中范围或全局搜索")
             styleClass.addAll("compact-list", "navigation-list")
@@ -375,6 +383,17 @@ class MainView(
 
                     init {
                         contentDisplay = ContentDisplay.GRAPHIC_ONLY
+                        addEventFilter(MouseEvent.MOUSE_PRESSED) { event ->
+                            val currentItem = item
+                            if (
+                                event.button == MouseButton.PRIMARY &&
+                                !isEmpty &&
+                                currentItem != null &&
+                                selectionModel.selectedItem == currentItem
+                            ) {
+                                activateNavigationItem(tableTabPane, currentItem)
+                            }
+                        }
                     }
 
                     override fun updateItem(item: TableNavigationItem?, empty: Boolean) {
@@ -433,21 +452,36 @@ class MainView(
                 }
             }
             selectionModel.selectedItemProperty().addListener { _, _, newValue ->
+                if (applyingControllerSelection[0]) {
+                    return@addListener
+                }
                 if (controller.selectedNavigationItemProperty().value == newValue) {
                     return@addListener
                 }
                 if (newValue != null) {
-                    val tableCode = newValue.tableCode?.takeIf { it.isNotBlank() } ?: newValue.tableName
-                    selectionContextProperty.set(tableCode)
-                    openTableTab(tableTabPane, newValue)
+                    activateNavigationItem(tableTabPane, newValue)
                 } else {
-                    // 还原为树选中的上下文
-                    selectionContextProperty.set(importTreePane.currentSelectionContextText())
+                    Platform.runLater {
+                        if (selectionModel.selectedItem == null && controller.selectedNavigationItemProperty().value == null) {
+                            selectionContextProperty.set(importTreePane.currentSelectionContextText())
+                            controller.selectNavigationItem(null, ::showError)
+                        }
+                    }
+                    return@addListener
                 }
-                controller.selectNavigationItem(newValue, ::showError)
             }
-            bindSelection(controller.selectedNavigationItemProperty())
+            bindSelection(controller.selectedNavigationItemProperty(), applyingControllerSelection)
         }
+
+    private fun activateNavigationItem(tableTabPane: TabPane, item: TableNavigationItem) {
+        val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
+        selectionContextProperty.set(tableCode)
+        openTableTab(tableTabPane, item)
+
+        if (controller.selectedNavigationItemProperty().value != item) {
+            controller.selectNavigationItem(item, ::showError)
+        }
+    }
 
     private fun openTableTab(tableTabPane: TabPane, item: TableNavigationItem) {
         val existing = tableTabPane.tabs
@@ -455,6 +489,7 @@ class MainView(
             .firstOrNull { it.tableId == item.tableId }
         if (existing != null) {
             tableTabPane.selectionModel.select(existing)
+            existing.focusColumn(item.matchedColumnIdInPdm)
         } else {
             val tab = TableDetailTab(item, catalogService, ::showError)
             tableTabPane.tabs.add(tab)
@@ -462,10 +497,18 @@ class MainView(
         }
     }
 
-    private fun <T> ListView<T>.bindSelection(property: ReadOnlyObjectProperty<T?>) {
+    private fun <T> ListView<T>.bindSelection(
+        property: ReadOnlyObjectProperty<T?>,
+        applyingControllerSelection: BooleanArray,
+    ) {
         property.addListener { _, _, newValue ->
             if (selectionModel.selectedItem != newValue) {
-                selectionModel.select(newValue)
+                applyingControllerSelection[0] = true
+                try {
+                    selectionModel.select(newValue)
+                } finally {
+                    applyingControllerSelection[0] = false
+                }
             }
         }
     }
