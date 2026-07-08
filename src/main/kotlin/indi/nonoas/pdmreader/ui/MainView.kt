@@ -126,9 +126,7 @@ class MainView(
                 controller.clearSearch(::showError)
             }
         }
-        val copyDdlButton = Button("复制 DDL").apply {
-            isDisable = true
-        }
+
         val aboutButton = Button("关于").apply {
             setOnAction {
                 showAboutDialog()
@@ -148,7 +146,6 @@ class MainView(
             8.0,
             importButton,
             refreshButton,
-            copyDdlButton,
             searchScopeSwitcher,
             searchField,
             clearSearchButton,
@@ -171,26 +168,6 @@ class MainView(
         tableTabPane.selectionModel.selectedItemProperty().addListener { _, _, tab ->
             activeTableTabProperty.set(tab as? TableDetailTab)
         }
-
-        // Re-bind copy DDL button to active tab
-        copyDdlButton.setOnAction {
-            val tab = activeTableTabProperty.get()
-            if (tab != null && tab.copyDdl()) {
-                controller.statusTextProperty.set("DDL 已复制到剪贴板。")
-            }
-        }
-        copyDdlButton.disableProperty().unbind()
-        copyDdlButton.disableProperty().bind(
-            Bindings.createBooleanBinding(
-                { activeTableTabProperty.get()?.hasDdlProperty?.get() != true },
-                activeTableTabProperty,
-            ).also { binding ->
-                activeTableTabProperty.addListener { _, _, tab ->
-                    binding.invalidate()
-                    tab?.hasDdlProperty?.addListener { _, _, _ -> binding.invalidate() }
-                }
-            }
-        )
 
         // Close tabs for removed PDM imports
         controller.imports.addListener(ListChangeListener { change ->

@@ -9,7 +9,7 @@
     -app-text: -color-fg-default;
     -app-text-muted: -color-fg-muted;
     -app-text-subtle: -color-fg-subtle;
-    /*    -app-accent: -color-accent-emphasis;*/
+    -app-accent: -color-accent-emphasis;
     /*    -app-accent-hover: -color-accent-fg;*/
     /*    -app-accent-pressed: -color-accent-6;*/
     /*    -app-selection: -color-accent-muted;*/
@@ -17,6 +17,64 @@
     -fx-font-size: 13px;
     /*    -fx-background-color: -color-bg-default;*/
     /*    -fx-text-fill: -app-text;*/
+}
+
+.table-tab-pane,
+.content-tabs {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.table-tab-pane > .tab-header-area,
+.content-tabs > .tab-header-area {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.table-tab-pane > .tab-header-area > .tab-header-background,
+.content-tabs > .tab-header-area > .tab-header-background {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.table-tab-pane > .tab-header-area > .headers-region,
+.content-tabs > .tab-header-area > .headers-region {
+    -fx-padding: 0;
+}
+
+.table-tab-pane > .tab-header-area > .headers-region > .tab,
+.content-tabs > .tab-header-area > .headers-region > .tab {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+    -fx-border-color: transparent;
+    -fx-border-width: 0 0 2 0;
+    -fx-padding: 6 10 6 10;
+}
+
+.table-tab-pane > .tab-header-area > .headers-region > .tab:selected,
+.content-tabs > .tab-header-area > .headers-region > .tab:selected {
+    -fx-border-color: transparent transparent -app-accent transparent;
+}
+
+.table-tab-pane > .tab-header-area > .headers-region > .tab:selected .focus-indicator,
+.content-tabs > .tab-header-area > .headers-region > .tab:selected .focus-indicator {
+    -fx-border-color: transparent;
+}
+
+.table-tab-pane > .tab-header-area > .headers-region > .tab .tab-label,
+.content-tabs > .tab-header-area > .headers-region > .tab .tab-label {
+    -fx-text-fill: -app-text-muted;
+}
+
+.table-tab-pane > .tab-header-area > .headers-region > .tab:selected .tab-label,
+.content-tabs > .tab-header-area > .headers-region > .tab:selected .tab-label {
+    -fx-text-fill: -app-text;
+}
+
+.table-tab-pane > .tab-content-area {
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
 }
 
 
@@ -150,10 +208,16 @@
 }
 
 .panel-surface,
-.detail-header,
-.content-tabs > .tab-content-area {
+.detail-header {
     -fx-border-color: -app-border;
     -fx-border-width: 1;
+}
+
+.content-tabs > .tab-content-area {
+    -fx-background-color: transparent;
+    -fx-border-color: -app-border;
+    -fx-border-width: 1;
+    -fx-padding: 0;
 }
 
 .panel-surface {
