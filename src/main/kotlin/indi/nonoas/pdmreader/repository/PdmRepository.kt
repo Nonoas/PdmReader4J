@@ -232,6 +232,55 @@ class PdmRepository(
         }
     }
 
+    fun listColumnNavigation(tableId: Long): List<TableNavigationItem> =
+        databaseFactory.openConnection().use { connection ->
+            connection.prepareStatement(
+                """
+                select i.id as import_id,
+                       i.file_name,
+                       i.file_path,
+                       i.group_name,
+                       t.id as table_id,
+                       t.table_name,
+                       t.table_code,
+                       t.table_comment,
+                       c.column_id_in_pdm,
+                       c.column_name,
+                       c.column_code
+                from pdm_column c
+                join pdm_table t on t.id = c.table_id
+                join import_file i on i.id = t.import_file_id
+                where t.id = ?
+                order by c.ordinal_position,
+                         upper(coalesce(c.column_code, c.column_name))
+                """.trimIndent()
+            ).use { statement ->
+                statement.setLong(1, tableId)
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            add(
+                                TableNavigationItem(
+                                    type = NavigationItemType.COLUMN_MATCH,
+                                    importId = resultSet.getLong("import_id"),
+                                    importFileName = resultSet.getString("file_name"),
+                                    importFilePath = resultSet.getString("file_path"),
+                                    importGroupName = resultSet.normalizedGroupName(),
+                                    tableId = resultSet.getLong("table_id"),
+                                    tableName = resultSet.getString("table_name"),
+                                    tableCode = resultSet.getString("table_code"),
+                                    tableComment = resultSet.getString("table_comment"),
+                                    matchedColumnIdInPdm = resultSet.getString("column_id_in_pdm"),
+                                    matchedColumnName = resultSet.getString("column_name"),
+                                    matchedColumnCode = resultSet.getString("column_code"),
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
     fun searchNavigation(
         keyword: String,
         importIds: Collection<Long> = emptyList(),

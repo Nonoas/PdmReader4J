@@ -1,6 +1,7 @@
 package indi.nonoas.pdmreader.repository
 
 import indi.nonoas.pdmreader.ddl.DdlGenerator
+import indi.nonoas.pdmreader.model.NavigationItemType
 import indi.nonoas.pdmreader.parser.PowerDesignerPdmParser
 import indi.nonoas.pdmreader.service.PdmCatalogService
 import java.nio.file.Files
@@ -75,6 +76,11 @@ class PdmRepositoryTest {
         val searchByTableScope = service.searchNavigation("sample", tableId = tables.single().tableId)
         assertEquals(1, searchByTableScope.size)
         assertEquals(tables.single().tableId, searchByTableScope.single().tableId)
+
+        val columnsByTableScope = service.loadColumnNavigation(tables.single().tableId)
+        assertEquals(2, columnsByTableScope.size)
+        assertTrue(columnsByTableScope.all { it.type == NavigationItemType.COLUMN_MATCH })
+        assertEquals(listOf("ID", "NAME"), columnsByTableScope.map { it.matchedColumnCode })
 
         assertEquals(2, service.deleteImports(listOf(secondImport.id, thirdImport.id)))
         assertTrue(service.listImports().isEmpty())

@@ -70,7 +70,7 @@ class MainView(
         }
         val searchScopeComboBox = ComboBox<SearchScopeMode>().apply {
             items.addAll(SearchScopeMode.CURRENT_SELECTION, SearchScopeMode.GLOBAL)
-            value = SearchScopeMode.CURRENT_SELECTION
+            value = SearchScopeMode.GLOBAL
             converter = object : StringConverter<SearchScopeMode>() {
                 override fun toString(scope: SearchScopeMode?): String = when (scope) {
                     SearchScopeMode.CURRENT_SELECTION -> "当前选中范围"
@@ -93,12 +93,14 @@ class MainView(
                     }, selectionContextProperty, itemProperty()))
                 }
             }
-            prefWidth = 110.0
+            prefWidth = 210.0
             styleClass.add("toolbar-combo")
             tooltip = Tooltip("当前选中支持分组、单个 PDM 文件和表；全局会搜索全部已导入内容")
             selectionModel.selectedItemProperty().addListener { _, _, newValue ->
                 newValue?.let { controller.setSearchScopeMode(it, ::showError) }
             }
+
+            HBox.setHgrow(this, Priority.ALWAYS)
         }
 
         val importButton = Button("导入 PDM").apply {

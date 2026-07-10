@@ -37,7 +37,7 @@ class MainController(
     private val canCopyDdl = ReadOnlyBooleanWrapper(false)
 
     private var searchKeyword: String = ""
-    private var searchScopeMode: SearchScopeMode = SearchScopeMode.CURRENT_SELECTION
+    private var searchScopeMode: SearchScopeMode = SearchScopeMode.GLOBAL
     private var scopedImportIds: List<Long> = emptyList()
     private var currentTableId: Long? = null
     private val requestSequence = AtomicLong(0)
@@ -485,8 +485,11 @@ class MainController(
             selectedImport = normalizedSelectedImport,
             scopedImportIds = normalizedScopedImportIds,
         )
+        val currentTableScopeId = currentTableId
+            ?.takeIf { searchScopeMode == SearchScopeMode.CURRENT_SELECTION }
         val navigationItems = if (searchKeyword.isBlank()) {
             when {
+                currentTableScopeId != null -> catalogService.loadColumnNavigation(currentTableScopeId)
                 normalizedScopedImportIds.isNotEmpty() -> catalogService.loadNavigation(normalizedScopedImportIds)
                 normalizedSelectedImport != null -> catalogService.loadNavigation(normalizedSelectedImport.id, "")
                 else -> emptyList()
@@ -514,11 +517,7 @@ class MainController(
                 tableViewData = null,
                 highlightedColumnId = "",
                 emptyStatusText = if (searchKeyword.isBlank()) {
-                    if (normalizedScopedImportIds.size > 1) {
-                        "当前分组中没有可展示的表。"
-                    } else {
-                        "文件 ${normalizedSelectedImport!!.fileName} 中没有可展示的表。"
-                    }
+                    buildEmptyNavigationStatusText(currentTableScopeId, normalizedScopedImportIds, normalizedSelectedImport)
                 } else {
                     "未在${describeSearchScope(effectiveSearchScope, imports)}中找到与“$searchKeyword”匹配的表或字段。"
                 },
@@ -543,11 +542,7 @@ class MainController(
                 tableViewData = null,
                 highlightedColumnId = "",
                 emptyStatusText = if (searchKeyword.isBlank()) {
-                    if (normalizedScopedImportIds.size > 1) {
-                        "当前分组中没有可展示的表。"
-                    } else {
-                        "文件 ${normalizedSelectedImport!!.fileName} 中没有可展示的表。"
-                    }
+                    buildEmptyNavigationStatusText(currentTableScopeId, normalizedScopedImportIds, normalizedSelectedImport)
                 } else {
                     "未在${describeSearchScope(effectiveSearchScope, imports)}中找到与“$searchKeyword”匹配的表或字段。"
                 },
@@ -573,6 +568,18 @@ class MainController(
             syncSelectionScope = syncSelectionScope,
         )
     }
+
+    private fun buildEmptyNavigationStatusText(
+        currentTableScopeId: Long?,
+        scopedImportIds: List<Long>,
+        selectedImport: PdmImportSummary?,
+    ): String =
+        when {
+            currentTableScopeId != null -> "当前表中没有可展示的字段。"
+            scopedImportIds.size > 1 -> "当前分组中没有可展示的表。"
+            selectedImport != null -> "文件 ${selectedImport.fileName} 中没有可展示的表。"
+            else -> "当前没有已导入的 PDM 元数据。"
+        }
 
     private fun resolveEffectiveSearchScope(
         keyword: String,

@@ -83,6 +83,9 @@ class PdmCatalogService(
     fun loadNavigation(importIds: Collection<Long>): List<TableNavigationItem> =
         repository.listTableNavigation(importIds)
 
+    fun loadColumnNavigation(tableId: Long): List<TableNavigationItem> =
+        repository.listColumnNavigation(tableId)
+
     fun searchNavigation(
         keyword: String,
         importIds: Collection<Long> = emptyList(),
