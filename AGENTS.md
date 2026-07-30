@@ -17,6 +17,11 @@ This repository currently contains a single planning document, [JAVAFX_PDM_MVP_G
 
 Use Java 17+ with 4-space indentation and UTF-8 source files. Prefer clear package boundaries over large controller classes. Use `PascalCase` for classes, `camelCase` for methods and fields, and `UPPER_SNAKE_CASE` for constants. Follow role-based suffixes such as `*Controller`, `*Service`, `*Repository`, and `*Parser`. Keep JavaFX UI logic separated from parsing and persistence logic.
 
+## 界面风格
+
+- 保证页面间距统一
+- css中的颜色应该使用参数变量，这样可以确保切换主题的时候颜色风格统一
+
 ## Agent-Specific Notes
 
 Do not treat this project as an Electron port. Preserve a clean Java architecture, keep parser/service/repository/ui layers separate, and use the sample `.pdm` file referenced in `JAVAFX_PDM_MVP_GUIDE.md` as the primary compatibility target.

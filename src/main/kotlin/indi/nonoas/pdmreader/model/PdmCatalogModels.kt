@@ -6,9 +6,23 @@ data class PdmImportSummary(
     val id: Long,
     val filePath: String,
     val fileName: String,
+    val groupName: String,
     val modelName: String,
     val targetDb: String?,
     val importTime: LocalDateTime,
+)
+
+data class PdmImportRefreshCandidate(
+    val id: Long,
+    val filePath: String,
+    val fileName: String,
+    val groupName: String,
+    val fileHash: String,
+)
+
+data class PdmRefreshResult(
+    val checkedCount: Int,
+    val reimported: List<PdmImportSummary>,
 )
 
 enum class NavigationItemType {
@@ -16,10 +30,17 @@ enum class NavigationItemType {
     COLUMN_MATCH,
 }
 
+enum class SearchScopeMode {
+    CURRENT_SELECTION,
+    GLOBAL,
+}
+
 data class TableNavigationItem(
     val type: NavigationItemType,
     val importId: Long,
     val importFileName: String,
+    val importFilePath: String,
+    val importGroupName: String,
     val tableId: Long,
     val tableName: String,
     val tableCode: String?,
@@ -48,6 +69,7 @@ data class PdmTableDetails(
     val importId: Long,
     val importFileName: String,
     val importFilePath: String,
+    val importGroupName: String,
     val modelName: String,
     val targetDb: String?,
     val tableId: Long,

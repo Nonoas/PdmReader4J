@@ -1,6 +1,7 @@
 package indi.nonoas.pdmreader.repository
 
 import indi.nonoas.pdmreader.ddl.DdlGenerator
+import indi.nonoas.pdmreader.model.NavigationItemType
 import indi.nonoas.pdmreader.parser.PowerDesignerPdmParser
 import indi.nonoas.pdmreader.service.PdmCatalogService
 import java.nio.file.Files
@@ -31,28 +32,57 @@ class PdmRepositoryTest {
         assertEquals(2, imports.size)
         assertTrue(imports.any { it.id == secondImport.id })
         assertTrue(imports.any { it.id == thirdImport.id })
+        assertTrue(imports.all { it.groupName == tempDir.fileName.toString() })
 
         val tables = service.loadNavigation(secondImport.id, "")
         assertEquals(1, tables.size)
+        assertEquals(secondImport.groupName, tables.single().importGroupName)
+        assertEquals(importedFile.toAbsolutePath().toString(), tables.single().importFilePath)
 
         val searchByTable = service.searchNavigation("sample")
         assertEquals(2, searchByTable.size)
         assertTrue(searchByTable.all { it.tableCode == "SAMPLE_TABLE" })
         assertEquals(setOf(secondImport.id, thirdImport.id), searchByTable.map { it.importId }.toSet())
+        assertEquals(
+            setOf(importedFile.toAbsolutePath().toString(), anotherImportedFile.toAbsolutePath().toString()),
+            searchByTable.map { it.importFilePath }.toSet()
+        )
 
         val searchByColumn = service.searchNavigation("name")
         assertEquals(2, searchByColumn.size)
         assertTrue(searchByColumn.all { it.matchedColumnCode == "NAME" })
         assertEquals(setOf(secondImport.id, thirdImport.id), searchByColumn.map { it.importId }.toSet())
 
+        val scopedSearchByImport = service.searchNavigation("name", importIds = listOf(secondImport.id))
+        assertEquals(1, scopedSearchByImport.size)
+        assertEquals(secondImport.id, scopedSearchByImport.single().importId)
+
         val tableViewData = service.loadTableViewData(tables.single().tableId)
         assertEquals(2, tableViewData.details.columns.size)
         assertTrue(tableViewData.ddl.contains("PRIMARY KEY (ID)"))
+        assertEquals(secondImport.groupName, tableViewData.details.importGroupName)
+        assertEquals(importedFile.toAbsolutePath().toString(), tableViewData.details.importFilePath)
         assertTrue(firstImport.id != secondImport.id)
 
-        assertTrue(service.deleteImport(secondImport.id))
-        assertEquals(1, service.listImports().size)
-        assertTrue(service.deleteImport(thirdImport.id))
+        assertEquals(1, service.renameImportGroup(listOf(secondImport.id), "核心模型-A"))
+        assertEquals(1, service.renameImportGroup(listOf(thirdImport.id), "核心模型-B"))
+        val renamedImports = service.listImports()
+        assertEquals(setOf("核心模型-A", "核心模型-B"), renamedImports.map { it.groupName }.toSet())
+
+        val groupNavigation = service.loadNavigation(listOf(secondImport.id, thirdImport.id))
+        assertEquals(2, groupNavigation.size)
+        assertEquals(setOf(secondImport.id, thirdImport.id), groupNavigation.map { it.importId }.toSet())
+
+        val searchByTableScope = service.searchNavigation("sample", tableId = tables.single().tableId)
+        assertEquals(1, searchByTableScope.size)
+        assertEquals(tables.single().tableId, searchByTableScope.single().tableId)
+
+        val columnsByTableScope = service.loadColumnNavigation(tables.single().tableId)
+        assertEquals(2, columnsByTableScope.size)
+        assertTrue(columnsByTableScope.all { it.type == NavigationItemType.COLUMN_MATCH })
+        assertEquals(listOf("ID", "NAME"), columnsByTableScope.map { it.matchedColumnCode })
+
+        assertEquals(2, service.deleteImports(listOf(secondImport.id, thirdImport.id)))
         assertTrue(service.listImports().isEmpty())
     }
 

@@ -3,9 +3,11 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 
 val myMainClass: String by project
+val javafxPreviewJvmArgs = listOf("-Djavafx.enablePreview=true")
 
 buildscript {
     repositories {
+        mavenLocal()
         mavenCentral()
         maven("https://central.sonatype.com/repository/maven-snapshots/")
     }
@@ -40,7 +42,7 @@ kotlin {
 
 javafx {
     version = "25.0.2"
-    modules("javafx.controls", "javafx.fxml")
+    modules("javafx.controls", "javafx.fxml", "javafx.swing", "javafx.graphics")
 }
 
 dependencies {
@@ -56,7 +58,7 @@ dependencies {
 
 application {
     mainClass.set(myMainClass)
-    applicationDefaultJvmArgs = listOf("-Dfile.encoding=UTF-8")
+    applicationDefaultJvmArgs = listOf("-Dfile.encoding=UTF-8") + javafxPreviewJvmArgs
 }
 
 tasks.withType<JavaCompile>().configureEach {
@@ -71,6 +73,7 @@ tasks.withType<KotlinJvmCompile>().configureEach {
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgs(javafxPreviewJvmArgs)
 }
 
 tasks.register<PackageTask>("packageMyApp") {
@@ -78,7 +81,7 @@ tasks.register<PackageTask>("packageMyApp") {
 
     vmArgs = listOf(
         "-Dfile.encoding=UTF-8",
-        "-Djavafx.enablePreview=true",
+        *javafxPreviewJvmArgs.toTypedArray(),
         "--add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED"
     )
 

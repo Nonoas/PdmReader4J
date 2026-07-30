@@ -16,14 +16,24 @@ class PdmRepository(
         initializeSchema()
     }
 
-    fun replaceImport(filePath: Path, fileHash: String, parsedModel: ParsedPdmModel): PdmImportSummary {
+    fun replaceImport(
+        filePath: Path,
+        fileHash: String,
+        parsedModel: ParsedPdmModel,
+        groupName: String? = null,
+    ): PdmImportSummary {
         logger.info("Persisting PDM metadata for: $filePath")
         databaseFactory.openConnection().use { connection ->
             connection.autoCommit = false
             try {
-                deleteExistingImport(connection, filePath.toAbsolutePath().toString())
+                val absoluteFilePath = filePath.toAbsolutePath().toString()
+                val resolvedGroupName = groupName
+                    ?.takeIf { it.isNotBlank() }
+                    ?: findImportGroupName(connection, absoluteFilePath)
+                    ?: defaultGroupName(absoluteFilePath)
+                deleteExistingImport(connection, absoluteFilePath)
 
-                val importId = insertImport(connection, filePath, fileHash, parsedModel)
+                val importId = insertImport(connection, filePath, fileHash, parsedModel, resolvedGroupName)
                 parsedModel.tables.forEach { table ->
                     val tableId = insertTable(connection, importId, table)
                     table.columns.forEach { column ->
@@ -47,13 +57,40 @@ class PdmRepository(
         }
     }
 
+    fun listRefreshCandidates(): List<PdmImportRefreshCandidate> =
+        databaseFactory.openConnection().use { connection ->
+            connection.prepareStatement(
+                """
+                select id, file_path, file_name, group_name, file_hash
+                from import_file
+                order by file_name
+                """.trimIndent()
+            ).use { statement ->
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            add(
+                                PdmImportRefreshCandidate(
+                                    id = resultSet.getLong("id"),
+                                    filePath = resultSet.getString("file_path"),
+                                    fileName = resultSet.getString("file_name"),
+                                    groupName = resultSet.normalizedGroupName(),
+                                    fileHash = resultSet.getString("file_hash"),
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
     fun listImports(): List<PdmImportSummary> =
         databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
                 """
-                select id, file_path, file_name, model_name, target_db, import_time
+                select id, file_path, file_name, group_name, model_name, target_db, import_time
                 from import_file
-                order by import_time desc, id desc
+                order by file_name
                 """.trimIndent()
             ).use { statement ->
                 statement.executeQuery().use { resultSet ->
@@ -67,35 +104,111 @@ class PdmRepository(
         }
 
     fun deleteImport(importId: Long): Boolean =
-        databaseFactory.openConnection().use { connection ->
+        deleteImports(listOf(importId)) > 0
+
+    fun deleteImports(importIds: Collection<Long>): Int {
+        val normalizedIds = importIds.distinct()
+        if (normalizedIds.isEmpty()) {
+            return 0
+        }
+
+        val placeholders = normalizedIds.joinToString(",") { "?" }
+        return databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
                 """
                 delete from import_file
-                where id = ?
+                where id in ($placeholders)
                 """.trimIndent()
             ).use { statement ->
-                statement.setLong(1, importId)
-                statement.executeUpdate() > 0
+                normalizedIds.forEachIndexed { index, importId ->
+                    statement.setLong(index + 1, importId)
+                }
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    fun saveConfig(key: String, value: String) {
+        databaseFactory.openConnection().use { connection ->
+            connection.prepareStatement(
+                "merge into app_config (config_key, config_value) key (config_key) values (?, ?)"
+            ).use { statement ->
+                statement.setString(1, key)
+                statement.setString(2, value)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    fun getConfig(key: String): String? =
+        databaseFactory.openConnection().use { connection ->
+            connection.prepareStatement(
+                "select config_value from app_config where config_key = ?"
+            ).use { statement ->
+                statement.setString(1, key)
+                statement.executeQuery().use { resultSet ->
+                    if (resultSet.next()) resultSet.getString("config_value") else null
+                }
             }
         }
 
+    fun renameImportGroup(importIds: Collection<Long>, groupName: String): Int {
+        val normalizedIds = importIds.distinct()
+        if (normalizedIds.isEmpty()) {
+            return 0
+        }
+
+        val placeholders = normalizedIds.joinToString(",") { "?" }
+        return databaseFactory.openConnection().use { connection ->
+            connection.prepareStatement(
+                """
+                update import_file
+                set group_name = ?
+                where id in ($placeholders)
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, groupName)
+                normalizedIds.forEachIndexed { index, importId ->
+                    statement.setLong(index + 2, importId)
+                }
+                statement.executeUpdate()
+            }
+        }
+    }
+
     fun listTableNavigation(importId: Long): List<TableNavigationItem> =
-        databaseFactory.openConnection().use { connection ->
+        listTableNavigation(listOf(importId))
+
+    fun listTableNavigation(importIds: Collection<Long>): List<TableNavigationItem> {
+        val normalizedIds = importIds.distinct()
+        if (normalizedIds.isEmpty()) {
+            return emptyList()
+        }
+
+        val placeholders = normalizedIds.joinToString(",") { "?" }
+        return databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
                 """
                 select i.id as import_id,
                        i.file_name,
+                       i.file_path,
+                       i.group_name,
                        t.id as table_id,
                        t.table_name,
                        t.table_code,
                        t.table_comment
                 from pdm_table t
                 join import_file i on i.id = t.import_file_id
-                where t.import_file_id = ?
-                order by upper(coalesce(t.table_code, t.table_name)), t.id
+                where t.import_file_id in ($placeholders)
+                order by upper(coalesce(i.group_name, '')),
+                         upper(i.file_name),
+                         upper(coalesce(t.table_code, t.table_name)),
+                         t.id
                 """.trimIndent()
             ).use { statement ->
-                statement.setLong(1, importId)
+                normalizedIds.forEachIndexed { index, importId ->
+                    statement.setLong(index + 1, importId)
+                }
                 statement.executeQuery().use { resultSet ->
                     buildList {
                         while (resultSet.next()) {
@@ -104,6 +217,8 @@ class PdmRepository(
                                     type = NavigationItemType.TABLE,
                                     importId = resultSet.getLong("import_id"),
                                     importFileName = resultSet.getString("file_name"),
+                                    importFilePath = resultSet.getString("file_path"),
+                                    importGroupName = resultSet.normalizedGroupName(),
                                     tableId = resultSet.getLong("table_id"),
                                     tableName = resultSet.getString("table_name"),
                                     tableCode = resultSet.getString("table_code"),
@@ -115,9 +230,73 @@ class PdmRepository(
                 }
             }
         }
+    }
 
-    fun searchNavigation(keyword: String): List<TableNavigationItem> {
+    fun listColumnNavigation(tableId: Long): List<TableNavigationItem> =
+        databaseFactory.openConnection().use { connection ->
+            connection.prepareStatement(
+                """
+                select i.id as import_id,
+                       i.file_name,
+                       i.file_path,
+                       i.group_name,
+                       t.id as table_id,
+                       t.table_name,
+                       t.table_code,
+                       t.table_comment,
+                       c.column_id_in_pdm,
+                       c.column_name,
+                       c.column_code
+                from pdm_column c
+                join pdm_table t on t.id = c.table_id
+                join import_file i on i.id = t.import_file_id
+                where t.id = ?
+                order by c.ordinal_position,
+                         upper(coalesce(c.column_code, c.column_name))
+                """.trimIndent()
+            ).use { statement ->
+                statement.setLong(1, tableId)
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            add(
+                                TableNavigationItem(
+                                    type = NavigationItemType.COLUMN_MATCH,
+                                    importId = resultSet.getLong("import_id"),
+                                    importFileName = resultSet.getString("file_name"),
+                                    importFilePath = resultSet.getString("file_path"),
+                                    importGroupName = resultSet.normalizedGroupName(),
+                                    tableId = resultSet.getLong("table_id"),
+                                    tableName = resultSet.getString("table_name"),
+                                    tableCode = resultSet.getString("table_code"),
+                                    tableComment = resultSet.getString("table_comment"),
+                                    matchedColumnIdInPdm = resultSet.getString("column_id_in_pdm"),
+                                    matchedColumnName = resultSet.getString("column_name"),
+                                    matchedColumnCode = resultSet.getString("column_code"),
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+    fun searchNavigation(
+        keyword: String,
+        importIds: Collection<Long> = emptyList(),
+        tableId: Long? = null,
+    ): List<TableNavigationItem> {
         val likeKeyword = "%${keyword.trim().lowercase()}%"
+        val normalizedImportIds = importIds.distinct()
+        val scopeClause = when {
+            tableId != null -> " and t.id = ?"
+            normalizedImportIds.isNotEmpty() -> {
+                val placeholders = normalizedImportIds.joinToString(",") { "?" }
+                " and t.import_file_id in ($placeholders)"
+            }
+
+            else -> ""
+        }
         return databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
                 """
@@ -127,6 +306,8 @@ class PdmRepository(
                            'TABLE' as match_type,
                            i.id as import_id,
                            i.file_name,
+                           i.file_path,
+                           i.group_name,
                            t.id as table_id,
                            t.table_name,
                            t.table_code,
@@ -136,7 +317,7 @@ class PdmRepository(
                            cast(null as varchar(255)) as column_code
                     from pdm_table t
                     join import_file i on i.id = t.import_file_id
-                    where lower(coalesce(t.table_name, '')) like ? or lower(coalesce(t.table_code, '')) like ?
+                    where (lower(coalesce(t.table_name, '')) like ? or lower(coalesce(t.table_code, '')) like ?)$scopeClause
 
                     union all
 
@@ -144,6 +325,8 @@ class PdmRepository(
                            'COLUMN' as match_type,
                            i.id as import_id,
                            i.file_name,
+                           i.file_path,
+                           i.group_name,
                            t.id as table_id,
                            t.table_name,
                            t.table_code,
@@ -154,18 +337,22 @@ class PdmRepository(
                     from pdm_column c
                     join pdm_table t on t.id = c.table_id
                     join import_file i on i.id = t.import_file_id
-                    where lower(coalesce(c.column_name, '')) like ? or lower(coalesce(c.column_code, '')) like ?
+                    where (lower(coalesce(c.column_name, '')) like ? or lower(coalesce(c.column_code, '')) like ?)$scopeClause
                 ) result
                 order by sort_order,
+                         upper(coalesce(group_name, '')),
                          upper(file_name),
                          upper(coalesce(table_code, table_name)),
                          upper(coalesce(column_code, column_name))
                 """.trimIndent()
             ).use { statement ->
-                statement.setString(1, likeKeyword)
-                statement.setString(2, likeKeyword)
-                statement.setString(3, likeKeyword)
-                statement.setString(4, likeKeyword)
+                var parameterIndex = 1
+                statement.setString(parameterIndex++, likeKeyword)
+                statement.setString(parameterIndex++, likeKeyword)
+                parameterIndex = bindSearchScopeParameters(statement, parameterIndex, normalizedImportIds, tableId)
+                statement.setString(parameterIndex++, likeKeyword)
+                statement.setString(parameterIndex++, likeKeyword)
+                bindSearchScopeParameters(statement, parameterIndex, normalizedImportIds, tableId)
                 statement.executeQuery().use { resultSet ->
                     buildList {
                         while (resultSet.next()) {
@@ -178,6 +365,8 @@ class PdmRepository(
                                     },
                                     importId = resultSet.getLong("import_id"),
                                     importFileName = resultSet.getString("file_name"),
+                                    importFilePath = resultSet.getString("file_path"),
+                                    importGroupName = resultSet.normalizedGroupName(),
                                     tableId = resultSet.getLong("table_id"),
                                     tableName = resultSet.getString("table_name"),
                                     tableCode = resultSet.getString("table_code"),
@@ -194,6 +383,22 @@ class PdmRepository(
         }
     }
 
+    private fun bindSearchScopeParameters(
+        statement: java.sql.PreparedStatement,
+        startIndex: Int,
+        importIds: List<Long>,
+        tableId: Long?,
+    ): Int {
+        var parameterIndex = startIndex
+        when {
+            tableId != null -> statement.setLong(parameterIndex++, tableId)
+            importIds.isNotEmpty() -> importIds.forEach { importId ->
+                statement.setLong(parameterIndex++, importId)
+            }
+        }
+        return parameterIndex
+    }
+
     fun findTableDetails(tableId: Long): PdmTableDetails? =
         databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
@@ -205,6 +410,7 @@ class PdmRepository(
                        i.id as import_id,
                        i.file_name,
                        i.file_path,
+                       i.group_name,
                        i.model_name,
                        i.target_db
                 from pdm_table t
@@ -223,6 +429,7 @@ class PdmRepository(
                         importId = resultSet.getLong("import_id"),
                         importFileName = resultSet.getString("file_name"),
                         importFilePath = resultSet.getString("file_path"),
+                        importGroupName = resultSet.normalizedGroupName(),
                         modelName = resultSet.getString("model_name"),
                         targetDb = resultSet.getString("target_db"),
                         tableId = resultSet.getLong("table_id"),
@@ -307,31 +514,48 @@ class PdmRepository(
         }
     }
 
+    private fun findImportGroupName(connection: Connection, filePath: String): String? =
+        connection.prepareStatement(
+            """
+            select group_name
+            from import_file
+            where file_path = ?
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, filePath)
+            statement.executeQuery().use { resultSet ->
+                if (resultSet.next()) resultSet.getString("group_name") else null
+            }
+        }
+
     private fun insertImport(
         connection: Connection,
         filePath: Path,
         fileHash: String,
         parsedModel: ParsedPdmModel,
+        groupName: String,
     ): Long =
         connection.prepareStatement(
             """
             insert into import_file (
                 file_path,
                 file_name,
+                group_name,
                 file_hash,
                 model_name,
                 target_db,
                 import_time
-            ) values (?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
             Statement.RETURN_GENERATED_KEYS,
         ).use { statement ->
             statement.setString(1, filePath.toAbsolutePath().toString())
             statement.setString(2, filePath.fileName.toString())
-            statement.setString(3, fileHash)
-            statement.setString(4, parsedModel.modelName)
-            statement.setString(5, parsedModel.targetDb)
-            statement.setObject(6, LocalDateTime.now())
+            statement.setString(3, groupName)
+            statement.setString(4, fileHash)
+            statement.setString(5, parsedModel.modelName)
+            statement.setString(6, parsedModel.targetDb)
+            statement.setObject(7, LocalDateTime.now())
             statement.executeUpdate()
             statement.generatedKeys.use { generatedKeys ->
                 if (generatedKeys.next()) {
@@ -415,7 +639,7 @@ class PdmRepository(
     private fun getImportById(connection: Connection, importId: Long): PdmImportSummary? =
         connection.prepareStatement(
             """
-            select id, file_path, file_name, model_name, target_db, import_time
+            select id, file_path, file_name, group_name, model_name, target_db, import_time
             from import_file
             where id = ?
             """.trimIndent()
@@ -435,8 +659,21 @@ class PdmRepository(
             id = getLong("id"),
             filePath = getString("file_path"),
             fileName = getString("file_name"),
+            groupName = normalizedGroupName(),
             modelName = getString("model_name"),
             targetDb = getString("target_db"),
             importTime = getObject("import_time", LocalDateTime::class.java),
         )
+
+    private fun java.sql.ResultSet.normalizedGroupName(): String =
+        getString("group_name")?.takeIf { it.isNotBlank() } ?: defaultGroupName(getString("file_path"))
+
+    private fun defaultGroupName(filePath: String): String =
+        runCatching {
+            Path.of(filePath)
+                .parent
+                ?.fileName
+                ?.toString()
+                ?.takeIf { it.isNotBlank() }
+        }.getOrNull() ?: "未分组"
 }

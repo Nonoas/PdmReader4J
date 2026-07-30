@@ -15,6 +15,7 @@ class DdlGeneratorTest {
                 importId = 1L,
                 importFileName = "sample.pdm",
                 importFilePath = "D:/sample.pdm",
+                importGroupName = "示例分组",
                 modelName = "SampleModel",
                 targetDb = "ORACLE Version 11g",
                 tableId = 10L,

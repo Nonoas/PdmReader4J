@@ -1,25 +1,32 @@
 package indi.nonoas.pdmreader.ui
 
 import github.nonoas.jfx.flat.ui.AppState
+import github.nonoas.jfx.flat.ui.stage.AppStage
+import github.nonoas.jfx.flat.ui.theme.Styles
+import github.nonoas.jfx.flat.ui.theme.Theme
+import indi.nonoas.pdmreader.app.AppThemeManager
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.model.NavigationItemType
-import indi.nonoas.pdmreader.model.PdmColumnDetail
-import indi.nonoas.pdmreader.model.PdmImportSummary
+import indi.nonoas.pdmreader.model.SearchScopeMode
 import indi.nonoas.pdmreader.model.TableNavigationItem
+import indi.nonoas.pdmreader.service.PdmCatalogService
 import javafx.application.Platform
+import javafx.beans.binding.Bindings
 import javafx.beans.property.ReadOnlyObjectProperty
+import javafx.beans.property.ReadOnlyObjectWrapper
 import javafx.beans.property.SimpleStringProperty
+import javafx.collections.ListChangeListener
 import javafx.geometry.Insets
 import javafx.geometry.Orientation
 import javafx.geometry.Pos
 import javafx.scene.control.*
-import javafx.scene.layout.BorderPane
-import javafx.scene.layout.HBox
-import javafx.scene.layout.Priority
-import javafx.scene.layout.VBox
-import javafx.scene.text.Text
+import javafx.scene.input.MouseButton
+import javafx.scene.input.MouseEvent
+import javafx.scene.layout.*
 import javafx.stage.FileChooser
+import javafx.stage.Stage
 import javafx.util.Callback
+import javafx.util.StringConverter
 import org.json.JSONObject
 import org.slf4j.LoggerFactory
 import java.awt.Desktop
@@ -31,38 +38,77 @@ import java.nio.file.Path
 
 class MainView(
     private val controller: MainController,
+    private val stage: Stage,
+    private val useExtendedWindow: Boolean,
+    private val themeManager: AppThemeManager,
+    private val catalogService: PdmCatalogService,
 ) {
     private val logger = LoggerFactory.getLogger(MainView::class.java)
+
+    private val selectionContextProperty = SimpleStringProperty("未选中")
+    private var importProgressDialog: Alert? = null
 
     companion object {
         const val APP_VERSION = "0.0.1"
         const val GITHUB_REPO = "Nonoas/PdmReader4J"
+        val PAGE_PADDING = Insets(12.0)
+        val SECTION_PADDING = Insets(10.0)
     }
 
     fun createContent(): BorderPane {
+        var suppressSearchFieldChange = false
         val searchField = TextField().apply {
             promptText = "搜索表名、表编码、字段名或字段编码"
+            styleClass.add("search-input")
             textProperty().addListener { _, _, newValue ->
+                if (suppressSearchFieldChange) {
+                    return@addListener
+                }
                 controller.setSearchKeyword(newValue, ::showError)
             }
             HBox.setHgrow(this, Priority.ALWAYS)
         }
+        val searchScopeComboBox = ComboBox<SearchScopeMode>().apply {
+            items.addAll(SearchScopeMode.CURRENT_SELECTION, SearchScopeMode.GLOBAL)
+            value = SearchScopeMode.GLOBAL
+            converter = object : StringConverter<SearchScopeMode>() {
+                override fun toString(scope: SearchScopeMode?): String = when (scope) {
+                    SearchScopeMode.CURRENT_SELECTION -> "当前选中范围"
+                    SearchScopeMode.GLOBAL -> "全局"
+                    null -> ""
+                }
+
+                override fun fromString(text: String?): SearchScopeMode? =
+                    items.firstOrNull { toString(it) == text }
+            }
+            buttonCell = object : ListCell<SearchScopeMode>() {
+                init {
+                    textProperty().bind(Bindings.createStringBinding({
+                        val currentItem: SearchScopeMode? = item
+                        when (currentItem) {
+                            SearchScopeMode.CURRENT_SELECTION -> selectionContextProperty.get()
+                            SearchScopeMode.GLOBAL -> "全局"
+                            null -> ""
+                        }
+                    }, selectionContextProperty, itemProperty()))
+                }
+            }
+            prefWidth = 210.0
+            styleClass.add("toolbar-combo")
+            tooltip = Tooltip("当前选中支持分组、单个 PDM 文件和表；全局会搜索全部已导入内容")
+            selectionModel.selectedItemProperty().addListener { _, _, newValue ->
+                newValue?.let { controller.setSearchScopeMode(it, ::showError) }
+            }
+
+            HBox.setHgrow(this, Priority.ALWAYS)
+        }
 
         val importButton = Button("导入 PDM").apply {
-            styleClass.add("primary-button")
+            styleClass.add(Styles.ACCENT)
             setOnAction {
                 val selectedFiles = choosePdmFiles()
                 if (selectedFiles.isNotEmpty()) {
                     controller.importPdms(selectedFiles.map(File::toPath), ::showError)
-                }
-            }
-        }
-        val removeImportButton = Button("移除选中").apply {
-            disableProperty().bind(controller.selectedImportProperty().isNull)
-            setOnAction {
-                val selectedImport = controller.selectedImportProperty().value ?: return@setOnAction
-                if (confirmRemoveImport(selectedImport)) {
-                    controller.removeImport(selectedImport, ::showError)
                 }
             }
         }
@@ -73,17 +119,13 @@ class MainView(
         }
         val clearSearchButton = Button("清空搜索").apply {
             setOnAction {
-                if (searchField.text.isEmpty()) {
-                    controller.clearSearch(::showError)
-                } else {
+                suppressSearchFieldChange = true
+                try {
                     searchField.clear()
+                } finally {
+                    suppressSearchFieldChange = false
                 }
-            }
-        }
-        val copyDdlButton = Button("复制 DDL").apply {
-            disableProperty().bind(controller.canCopyDdlProperty().not())
-            setOnAction {
-                runOnUiAction { controller.copySelectedDdlToClipboard() }
+                controller.clearSearch(::showError)
             }
         }
 
@@ -92,240 +134,360 @@ class MainView(
                 showAboutDialog()
             }
         }
-        val toolbar = ToolBar(
+        val themeSwitcher = createThemeSwitcher()
+        val searchScopeSwitcher = HBox(
+            6.0,
+            Label("范围").apply { styleClass.add("field-label") },
+            searchScopeComboBox,
+        ).apply {
+            alignment = Pos.CENTER_LEFT
+            styleClass.add("toolbar-group")
+        }
+
+        val toolbar = HBox(
+            8.0,
             importButton,
-            removeImportButton,
             refreshButton,
-            copyDdlButton,
+            searchScopeSwitcher,
             searchField,
             clearSearchButton,
-            aboutButton,
+            themeSwitcher,
+            aboutButton
         ).apply {
-            styleClass.add("top-toolbar")
+            alignment = Pos.CENTER_LEFT
+            padding = PAGE_PADDING
+            styleClass.add("toolbar-strip")
         }
 
-        val importListView = createImportListView()
-        val navigationListView = createNavigationListView()
-        val columnsTable = createColumnsTable()
-        val ddlArea = TextArea().apply {
-            isEditable = false
-            isWrapText = false
-            promptText = "选择表后在这里预览生成的 DDL。"
-            textProperty().bind(controller.ddlTextProperty)
-            styleClass.add("ddl-area")
+        val tableTabPane = TabPane().apply {
+            tabClosingPolicy = TabPane.TabClosingPolicy.ALL_TABS
+            styleClass.add("table-tab-pane")
+            VBox.setVgrow(this, Priority.ALWAYS)
         }
 
-        val headerBox = VBox(
-            8.0,
-            Label().apply {
-                textProperty().bind(controller.selectedTableTitleProperty)
-                styleClass.add("table-title")
-            },
-            Label().apply {
-                textProperty().bind(controller.selectedTableMetaProperty)
-                styleClass.add("table-meta")
-            },
-            Label().apply {
-                textProperty().bind(controller.selectedTableCommentProperty)
-                styleClass.add("table-comment")
-                isWrapText = true
-            },
-        ).apply {
-            padding = Insets(20.0, 20.0, 16.0, 20.0)
-            styleClass.add("detail-header")
+        // Track active tab for toolbar interactions
+        val activeTableTabProperty = ReadOnlyObjectWrapper<TableDetailTab?>()
+        tableTabPane.selectionModel.selectedItemProperty().addListener { _, _, tab ->
+            activeTableTabProperty.set(tab as? TableDetailTab)
         }
 
-        val rightPane = BorderPane().apply {
-            top = headerBox
-            center = VBox(
-                10.0,
-                Label("字段明细").apply { styleClass.add("section-title") },
-                columnsTable,
-                Label("DDL 预览").apply { styleClass.add("section-title") },
-                ddlArea,
-            ).apply {
-                padding = Insets(0.0, 20.0, 20.0, 20.0)
-                VBox.setVgrow(columnsTable, Priority.ALWAYS)
-                VBox.setVgrow(ddlArea, Priority.ALWAYS)
+        // Close tabs for removed PDM imports
+        controller.imports.addListener(ListChangeListener { change ->
+            while (change.next()) {
+                if (change.wasRemoved()) {
+                    val removedIds = change.removed.map { it.id }.toSet()
+                    tableTabPane.tabs.removeAll(
+                        tableTabPane.tabs.filterIsInstance<TableDetailTab>()
+                            .filter { it.importId in removedIds }
+                    )
+                }
             }
+        })
+
+        val importTreePane = ImportTreePane(controller, ::showError, selectionContextProperty::set)
+        val navigationListView = createNavigationListView(tableTabPane, importTreePane)
+
+        val rightPane = StackPane(
+            tableTabPane,
+            Label("选择左侧列表中的表后查看详情").apply {
+                styleClass.add("tree-placeholder")
+                isMouseTransparent = true
+                visibleProperty().bind(
+                    Bindings.isEmpty(tableTabPane.tabs)
+                )
+                managedProperty().bind(visibleProperty())
+            },
+        ).apply {
+            padding = PAGE_PADDING
+            styleClass.add("detail-panel")
         }
 
         val leftPane = VBox(
-            10.0,
-            Label("已导入文件").apply { styleClass.add("section-title") },
-            importListView,
-            Label("表与搜索结果").apply { styleClass.add("section-title") },
-            navigationListView,
+            8.0,
+            createSectionPane("已导入文件", importTreePane),
+            createSectionPane("表与搜索结果", navigationListView),
         ).apply {
-            padding = Insets(20.0)
-            prefWidth = 340.0
-            VBox.setVgrow(importListView, Priority.SOMETIMES)
-            VBox.setVgrow(navigationListView, Priority.ALWAYS)
+            prefWidth = 320.0
+            padding = PAGE_PADDING
+            styleClass.add("sidebar-panel")
         }
 
         val splitPane = SplitPane(leftPane, rightPane).apply {
             orientation = Orientation.HORIZONTAL
-            setDividerPositions(0.34)
+            setDividerPositions(0.31)
+            styleClass.add("workspace-split")
         }
 
         val statusLabel = Label().apply {
             textProperty().bind(controller.statusTextProperty)
-            styleClass.add("status-label")
+            maxWidth = Double.MAX_VALUE
+            styleClass.add("status-bar")
+        }
+
+        val topContainer = VBox().apply {
+            styleClass.add("top-shell")
+            if (useExtendedWindow) {
+                children.add(createHeaderBar())
+            }
+            children.add(toolbar)
         }
 
         val root = BorderPane().apply {
-            top = toolbar
+            top = topContainer
             center = splitPane
             bottom = statusLabel
-            stylesheets.add(
-                MainView::class.java.getResource("/styles/app.css")?.toExternalForm()
-                    ?: error("Missing stylesheet: /styles/app.css")
-            )
+            styleClass.add("app-shell")
         }
+
+        installImportProgressDialog()
         controller.initialize(::showError)
         return root
     }
 
-    private fun createImportListView(): ListView<PdmImportSummary> =
-        ListView(controller.imports).apply {
-            selectionModel.selectionMode = SelectionMode.SINGLE
-            placeholder = Label("尚未导入任何 PDM 文件")
-            cellFactory = Callback {
-                object : ListCell<PdmImportSummary>() {
-                    override fun updateItem(item: PdmImportSummary?, empty: Boolean) {
-                        super.updateItem(item, empty)
+    private fun createThemeSwitcher(): HBox {
+        val themeComboBox = ComboBox<Theme>().apply {
+            items.addAll(themeManager.availableThemes())
+            converter = object : StringConverter<Theme>() {
+                override fun toString(theme: Theme?): String = theme?.displayName().orEmpty()
 
-                        styleClass.remove("multi-line-cell")
-
-                        if (empty || item == null) {
-                            text = null
-                            graphic = null
-                            return
-                        }
-
-                        styleClass.add("multi-line-cell")
-                        text = null
-
-                        graphic = buildSingleLineText(
-                            Text(item.modelName),
-                            Text("-"),
-                            Text(item.fileName).apply { styleClass.add("file-name-text") }
-                        )
-                    }
+                override fun fromString(text: String?): Theme? =
+                    items.firstOrNull { it.displayName() == text }
+            }
+            value = themeManager.currentTheme()
+            visibleRowCount = items.size.coerceAtMost(6)
+            prefWidth = 120.0
+            styleClass.add("toolbar-combo")
+            tooltip = Tooltip("切换界面主题")
+            selectionModel.selectedItemProperty().addListener { _, _, newTheme ->
+                themeManager.switchTheme(newTheme)
+            }
+            themeManager.currentThemeProperty().addListener { _, _, newTheme ->
+                if (newTheme != null && selectionModel.selectedItem?.name != newTheme.name) {
+                    selectionModel.select(newTheme)
                 }
             }
-            selectionModel.selectedItemProperty().addListener { _, _, newValue ->
-                if (controller.selectedImportProperty().value == newValue) {
-                    return@addListener
-                }
-                controller.selectImport(newValue, ::showError)
-            }
-            bindSelection(controller.selectedImportProperty())
         }
 
-    private fun createNavigationListView(): ListView<TableNavigationItem> =
+        return HBox(
+            6.0,
+            Label("主题").apply { styleClass.add("field-label") },
+            themeComboBox,
+        ).apply {
+            alignment = Pos.CENTER_LEFT
+            styleClass.add("toolbar-group")
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun createHeaderBar(): HeaderBar {
+        val brandBlock = HBox(
+            10.0,
+            Label("PDM").apply {
+                styleClass.add("brand-mark")
+            },
+            VBox(
+                2.0,
+                Label(controller.windowTitle).apply { styleClass.add("brand-title") },
+                Label("PowerDesigner 模型阅读与检索").apply { styleClass.add("brand-subtitle") },
+            ).apply {
+                alignment = Pos.CENTER_LEFT
+            },
+        ).apply {
+            alignment = Pos.CENTER_LEFT
+            styleClass.add("brand-block")
+        }
+
+        val previewChip = Label("JavaFX 25 Preview").apply {
+            styleClass.add("window-pill")
+        }
+
+        return (stage as AppStage).headerBar.apply {
+            styleClass.add("window-header")
+            leading = brandBlock
+            prefHeight = 48.0
+            padding = PAGE_PADDING
+            HeaderBar.setMargin(brandBlock, Insets(0.0, 0.0, 0.0, 4.0))
+            HeaderBar.setMargin(previewChip, Insets(0.0, 6.0, 0.0, 0.0))
+            HeaderBar.setDragType(brandBlock, HeaderDragType.DRAGGABLE_SUBTREE)
+            HeaderBar.setDragType(previewChip, HeaderDragType.DRAGGABLE)
+        }
+    }
+
+    private fun createSectionPane(title: String, content: Region): VBox {
+        val contentWrapper = StackPane(content).apply {
+            VBox.setVgrow(this, Priority.ALWAYS)
+        }
+
+        return VBox(
+            6.0,
+            Label(title).apply { styleClass.add("panel-title") },
+            contentWrapper,
+        ).apply {
+            styleClass.add("panel-section")
+            styleClass.add("panel-surface")
+            VBox.setVgrow(contentWrapper, Priority.ALWAYS)
+        }
+    }
+
+    private fun createNavigationListView(
+        tableTabPane: TabPane,
+        importTreePane: ImportTreePane,
+    ): ListView<TableNavigationItem> =
         ListView(controller.navigationItems).apply {
+            val applyingControllerSelection = booleanArrayOf(false)
             selectionModel.selectionMode = SelectionMode.SINGLE
-            placeholder = Label("选择导入文件后显示表清单，输入关键字后可搜索全部已导入的 PDM")
+            placeholder = Label("选择分组或文件后显示表清单，输入关键字后可按当前选中范围或全局搜索")
+            styleClass.addAll("compact-list", "navigation-list")
             cellFactory = Callback {
                 object : ListCell<TableNavigationItem>() {
+                    private val typeLabel = Label().apply {
+                        styleClass.add("type-badge")
+                    }
+                    private val nameLabel = Label().apply {
+                        styleClass.add("list-item-title")
+                    }
+                    private val titleRow = HBox(4.0, typeLabel, nameLabel).apply {
+                        alignment = Pos.CENTER_LEFT
+                    }
+                    private val metaLabel = Label().apply {
+                        styleClass.add("list-item-meta")
+                        isWrapText = true
+                    }
+
+                    private val contentCard = VBox(2.0, titleRow, metaLabel).apply {
+                        styleClass.add("list-item-box")
+                    }
+
+                    private val contentBox = StackPane(contentCard)
+
+                    init {
+                        contentDisplay = ContentDisplay.GRAPHIC_ONLY
+                        addEventFilter(MouseEvent.MOUSE_PRESSED) { event ->
+                            val currentItem = item
+                            if (
+                                event.button == MouseButton.PRIMARY &&
+                                !isEmpty &&
+                                currentItem != null &&
+                                selectionModel.selectedItem == currentItem
+                            ) {
+                                activateNavigationItem(tableTabPane, currentItem)
+                            }
+                        }
+                    }
+
                     override fun updateItem(item: TableNavigationItem?, empty: Boolean) {
                         super.updateItem(item, empty)
 
-                        styleClass.remove("multi-line-cell")
-
                         if (empty || item == null) {
-                            text = null
                             graphic = null
                             return
                         }
 
-                        styleClass.add("multi-line-cell")
-                        text = null
-
                         val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
-                        val mainText = when (item.type) {
-                            NavigationItemType.TABLE -> {
-                                "[表] $tableCode-${item.tableName}"
+                        val tableName = item.tableName.ifBlank { "未命名表" }
+                        typeLabel.apply {
+                            styleClass.removeAll("table-type", "column-type")
+                            when (item.type) {
+                                NavigationItemType.TABLE -> styleClass.add("table-type")
+                                NavigationItemType.COLUMN_MATCH -> styleClass.add("column-type")
                             }
-
+                            text = when (item.type) {
+                                NavigationItemType.TABLE -> "[表]"
+                                else -> "[列]"
+                            }
+                        }
+                        nameLabel.text = when (item.type) {
+                            NavigationItemType.TABLE -> tableCode
                             else -> {
                                 val columnCode =
                                     item.matchedColumnCode?.takeIf { it.isNotBlank() } ?: item.matchedColumnName
-                                "[列] $tableCode > ${columnCode.orEmpty()}-${item.tableName}"
+                                "$tableCode / ${columnCode.orEmpty()}"
                             }
                         }
+                        metaLabel.text = when (item.type) {
+                            NavigationItemType.TABLE -> buildString {
+                                append(tableName)
+                                append(" · ")
+                                append(item.importFileName)
+                                append(" · ")
+                                append(item.importGroupName)
+                            }
 
-                        graphic = buildSingleLineText(
-                            Text(mainText),
-                            Text("-"),
-                            Text(item.importFileName).apply { styleClass.add("file-name-text") }
-                        )
+                            else -> {
+                                val columnName = item.matchedColumnName?.takeIf { it.isNotBlank() } ?: "未命名字段"
+                                buildString {
+                                    append(columnName)
+                                    append(" · ")
+                                    append(tableName)
+                                    append(" · ")
+                                    append(item.importFileName)
+                                    append(" · ")
+                                    append(item.importGroupName)
+                                }
+                            }
+                        }
+                        if (graphic !== contentBox) graphic = contentBox
                     }
                 }
             }
             selectionModel.selectedItemProperty().addListener { _, _, newValue ->
+                if (applyingControllerSelection[0]) {
+                    return@addListener
+                }
                 if (controller.selectedNavigationItemProperty().value == newValue) {
                     return@addListener
                 }
-                controller.selectNavigationItem(newValue, ::showError)
+                if (newValue != null) {
+                    activateNavigationItem(tableTabPane, newValue)
+                } else {
+                    Platform.runLater {
+                        if (selectionModel.selectedItem == null && controller.selectedNavigationItemProperty().value == null) {
+                            selectionContextProperty.set(importTreePane.currentSelectionContextText())
+                            controller.selectNavigationItem(null, ::showError)
+                        }
+                    }
+                    return@addListener
+                }
             }
-            bindSelection(controller.selectedNavigationItemProperty())
+            bindSelection(controller.selectedNavigationItemProperty(), applyingControllerSelection)
         }
 
-    private fun buildSingleLineText(vararg texts: Text): HBox =
-        HBox(*texts).apply {
-            spacing = 0.0
-        }
+    private fun activateNavigationItem(tableTabPane: TabPane, item: TableNavigationItem) {
+        val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
+        selectionContextProperty.set(tableCode)
+        openTableTab(tableTabPane, item)
 
-    private fun createColumnsTable(): TableView<PdmColumnDetail> {
-        val table = TableView<PdmColumnDetail>(controller.columns).apply {
-            columnResizePolicy = TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN
-            placeholder = Label("选择表后显示字段列表")
-            styleClass.add("columns-table")
+        if (controller.selectedNavigationItemProperty().value != item) {
+            controller.selectNavigationItem(item, ::showError)
         }
-
-        table.columns += textColumn("序号") { it.ordinalPosition.toString() }.apply {
-            prefWidth = 70.0
-            comparator = Comparator { a, b -> a.toInt().compareTo(b.toInt()) }
-        }
-        table.columns += textColumn("字段名称") { it.name }.apply { prefWidth = 140.0 }
-        table.columns += textColumn("字段编码") { it.code.orEmpty() }.apply { prefWidth = 160.0 }
-        table.columns += textColumn("数据类型") { it.dataType.orEmpty() }.apply { prefWidth = 150.0 }
-        table.columns += textColumn("非空") { if (it.nullable) "否" else "是" }.apply { prefWidth = 70.0 }
-        table.columns += textColumn("主键") { if (it.pkFlag) "是" else "" }.apply { prefWidth = 70.0 }
-        table.columns += textColumn("默认值") { it.defaultValue.orEmpty() }.apply { prefWidth = 140.0 }
-        table.columns += textColumn("说明") { it.comment.orEmpty() }.apply { prefWidth = 180.0 }
-
-        controller.highlightedColumnIdProperty.addListener { _, _, newValue ->
-            if (newValue.isNullOrBlank()) {
-                table.selectionModel.clearSelection()
-                return@addListener
-            }
-            val index = controller.columns.indexOfFirst { it.idInPdm == newValue }
-            if (index >= 0) {
-                table.selectionModel.select(index)
-                table.scrollTo(index)
-            }
-        }
-
-        return table
     }
 
-    private fun textColumn(
-        title: String,
-        valueProvider: (PdmColumnDetail) -> String
-    ): TableColumn<PdmColumnDetail, String> =
-        TableColumn<PdmColumnDetail, String>(title).apply {
-            setCellValueFactory { cell ->
-                SimpleStringProperty(valueProvider(cell.value))
-            }
+    private fun openTableTab(tableTabPane: TabPane, item: TableNavigationItem) {
+        val existing = tableTabPane.tabs
+            .filterIsInstance<TableDetailTab>()
+            .firstOrNull { it.tableId == item.tableId }
+        if (existing != null) {
+            tableTabPane.selectionModel.select(existing)
+            existing.focusColumn(item.matchedColumnIdInPdm)
+        } else {
+            val tab = TableDetailTab(item, catalogService, ::showError)
+            tableTabPane.tabs.add(tab)
+            tableTabPane.selectionModel.select(tab)
         }
+    }
 
-    private fun <T> ListView<T>.bindSelection(property: ReadOnlyObjectProperty<T?>) {
+    private fun <T> ListView<T>.bindSelection(
+        property: ReadOnlyObjectProperty<T?>,
+        applyingControllerSelection: BooleanArray,
+    ) {
         property.addListener { _, _, newValue ->
             if (selectionModel.selectedItem != newValue) {
-                selectionModel.select(newValue)
+                applyingControllerSelection[0] = true
+                try {
+                    selectionModel.select(newValue)
+                } finally {
+                    applyingControllerSelection[0] = false
+                }
             }
         }
     }
@@ -337,14 +499,7 @@ class MainView(
                 FileChooser.ExtensionFilter("PowerDesigner PDM", "*.pdm")
             )
             initialDirectory = defaultInitialDirectory()
-        }.showOpenMultipleDialog(null).orEmpty()
-
-    private fun confirmRemoveImport(importSummary: PdmImportSummary): Boolean =
-        DialogWithIcon.confirm(
-            "确认移除",
-            "确认移除已导入的 PDM 吗？\n${importSummary.modelName}\n${importSummary.fileName}"
-        )
-
+        }.showOpenMultipleDialog(stage).orEmpty()
 
     private fun defaultInitialDirectory(): File {
         val sampleDirectory = Path.of(
@@ -356,20 +511,64 @@ class MainView(
         }
     }
 
-    private fun runOnUiAction(action: () -> Unit) {
-        try {
-            action()
-        } catch (exception: Exception) {
-            showError(exception)
-        }
-    }
-
     private fun showError(exception: Throwable) {
         logger.error(exception.message, exception)
         DialogWithIcon.error("执行失败", exception.message ?: "未知错误")
     }
 
-    // ==================== 关于 & 更新 ====================
+    private fun installImportProgressDialog() {
+        controller.importProgressVisibleProperty.addListener { _, _, visible ->
+            if (visible) {
+                showImportProgressDialog()
+            } else {
+                closeImportProgressDialog()
+            }
+        }
+    }
+
+    private fun showImportProgressDialog() {
+        if (importProgressDialog != null) {
+            return
+        }
+
+        val progressBar = ProgressBar().apply {
+            prefWidth = 360.0
+            progressProperty().bind(controller.importProgressValueProperty)
+        }
+        val progressLabel = Label().apply {
+            textProperty().bind(controller.importProgressTextProperty)
+            maxWidth = 360.0
+            isWrapText = true
+        }
+        val content = VBox(10.0, progressLabel, progressBar).apply {
+            padding = Insets(16.0, 4.0, 4.0, 4.0)
+        }
+
+        importProgressDialog = Alert(Alert.AlertType.INFORMATION).apply {
+            title = "同步 PDM"
+            headerText = "正在校验并导入 PDM 文件"
+            dialogPane.content = content
+            dialogPane.buttonTypes.setAll(ButtonType.CLOSE)
+            isResizable = true
+            initOwner(stage)
+            setOnHidden { importProgressDialog = null }
+            show()
+        }
+    }
+
+    private fun closeImportProgressDialog() {
+        importProgressDialog?.dialogPane?.content?.let { content ->
+            (content as? VBox)?.children?.forEach { node ->
+                when (node) {
+                    is Label -> node.textProperty().unbind()
+                    is ProgressBar -> node.progressProperty().unbind()
+                    else -> Unit
+                }
+            }
+        }
+        importProgressDialog?.close()
+        importProgressDialog = null
+    }
 
     private fun showAboutDialog() {
         val repoUrl = "https://github.com/$GITHUB_REPO"
@@ -518,7 +717,7 @@ class MainView(
         val assetList = if (release.assets.isEmpty()) {
             "（无可下载文件，请前往 GitHub 页面查看）"
         } else {
-            release.assets.joinToString("\n") { "  \u2022 ${it.name}  (${formatSize(it.size)})" }
+            release.assets.joinToString("\n") { "  • ${it.name}  (${formatSize(it.size)})" }
         }
 
         val changelog = release.body.takeIf { it.isNotBlank() } ?: "（暂无更新说明）"
@@ -563,7 +762,7 @@ class MainView(
         val target = FileChooser().apply {
             title = "保存 ${asset.name}"
             initialFileName = asset.name
-        }.showSaveDialog(null) ?: return
+        }.showSaveDialog(stage) ?: return
 
         Thread({
             try {
@@ -595,6 +794,7 @@ class MainView(
                         dialogPane.content = content
                         buttonTypes.setAll(ButtonType.CANCEL)
                         isResizable = true
+                        initOwner(AppState.getStage())
                     }
                     progressBarRef[0] = bar
                     progressLabelRef[0] = label
@@ -671,6 +871,7 @@ class MainView(
                 Alert(Alert.AlertType.INFORMATION).apply {
                     title = "打开下载页面"
                     headerText = "请手动在浏览器中打开以下链接"
+                    initOwner(AppState.getStage())
                     dialogPane.content = TextArea(url).apply {
                         isEditable = false
                         prefWidth = 400.0
@@ -679,5 +880,12 @@ class MainView(
                 }.showAndWait()
             }
         }
+    }
+
+    private fun Theme.displayName(): String = when (name.lowercase()) {
+        "light" -> "浅色"
+        "dark" -> "深色"
+        "claude" -> "Claude"
+        else -> name.ifBlank { "未命名主题" }
     }
 }
