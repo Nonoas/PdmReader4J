@@ -30,11 +30,6 @@ enum class NavigationItemType {
     COLUMN_MATCH,
 }
 
-enum class SearchScopeMode {
-    CURRENT_SELECTION,
-    GLOBAL,
-}
-
 data class TableNavigationItem(
     val type: NavigationItemType,
     val importId: Long,
@@ -48,6 +43,13 @@ data class TableNavigationItem(
     val matchedColumnIdInPdm: String? = null,
     val matchedColumnName: String? = null,
     val matchedColumnCode: String? = null,
+)
+
+data class NavigationSearchPage(
+    val items: List<TableNavigationItem>,
+    val totalCount: Int,
+    val pageIndex: Int,
+    val pageSize: Int,
 )
 
 data class PdmColumnDetail(

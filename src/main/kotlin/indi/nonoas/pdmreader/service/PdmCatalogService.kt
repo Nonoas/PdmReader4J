@@ -1,10 +1,7 @@
 package indi.nonoas.pdmreader.service
 
 import indi.nonoas.pdmreader.ddl.DdlGenerator
-import indi.nonoas.pdmreader.model.PdmImportSummary
-import indi.nonoas.pdmreader.model.PdmRefreshResult
-import indi.nonoas.pdmreader.model.PdmTableViewData
-import indi.nonoas.pdmreader.model.TableNavigationItem
+import indi.nonoas.pdmreader.model.*
 import indi.nonoas.pdmreader.parser.PowerDesignerPdmParser
 import indi.nonoas.pdmreader.repository.PdmRepository
 import indi.nonoas.pdmreader.util.HashUtils
@@ -83,6 +80,17 @@ class PdmCatalogService(
     fun loadNavigation(importIds: Collection<Long>): List<TableNavigationItem> =
         repository.listTableNavigation(importIds)
 
+    fun loadNavigationPage(
+        importIds: Collection<Long>,
+        pageIndex: Int,
+        pageSize: Int,
+    ): NavigationSearchPage =
+        repository.listTableNavigationPage(
+            importIds = importIds,
+            pageIndex = pageIndex,
+            pageSize = pageSize,
+        )
+
     fun loadColumnNavigation(tableId: Long): List<TableNavigationItem> =
         repository.listColumnNavigation(tableId)
 
@@ -90,11 +98,30 @@ class PdmCatalogService(
         keyword: String,
         importIds: Collection<Long> = emptyList(),
         tableId: Long? = null,
+        searchColumns: Boolean = false,
     ): List<TableNavigationItem> =
         repository.searchNavigation(
             keyword = keyword.trim(),
             importIds = importIds,
             tableId = tableId,
+            searchColumns = searchColumns,
+        )
+
+    fun searchNavigationPage(
+        keyword: String,
+        importIds: Collection<Long> = emptyList(),
+        tableId: Long? = null,
+        searchColumns: Boolean = false,
+        pageIndex: Int,
+        pageSize: Int,
+    ): NavigationSearchPage =
+        repository.searchNavigationPage(
+            keyword = keyword.trim(),
+            importIds = importIds,
+            tableId = tableId,
+            searchColumns = searchColumns,
+            pageIndex = pageIndex,
+            pageSize = pageSize,
         )
 
     fun loadTableViewData(tableId: Long): PdmTableViewData {

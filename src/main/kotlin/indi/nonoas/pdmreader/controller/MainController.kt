@@ -31,13 +31,19 @@ class MainController(
     val importProgressVisibleProperty: BooleanProperty = SimpleBooleanProperty(false)
     val importProgressTextProperty: StringProperty = SimpleStringProperty("")
     val importProgressValueProperty: DoubleProperty = SimpleDoubleProperty(ProgressIndicator.INDETERMINATE_PROGRESS)
+    val searchPageTextProperty: StringProperty = SimpleStringProperty("")
 
     private val selectedImport = ReadOnlyObjectWrapper<PdmImportSummary?>()
     private val selectedNavigationItem = ReadOnlyObjectWrapper<TableNavigationItem?>()
     private val canCopyDdl = ReadOnlyBooleanWrapper(false)
+    private val searchPaginationVisible = ReadOnlyBooleanWrapper(false)
+    private val canGoToPreviousSearchPage = ReadOnlyBooleanWrapper(false)
+    private val canGoToNextSearchPage = ReadOnlyBooleanWrapper(false)
 
     private var searchKeyword: String = ""
-    private var searchScopeMode: SearchScopeMode = SearchScopeMode.GLOBAL
+    private var searchGroupName: String? = null
+    private var searchColumns: Boolean = false
+    private var searchPageIndex: Int = 0
     private var scopedImportIds: List<Long> = emptyList()
     private var currentTableId: Long? = null
     private val requestSequence = AtomicLong(0)
@@ -49,16 +55,34 @@ class MainController(
 
     fun canCopyDdlProperty(): ReadOnlyBooleanProperty = canCopyDdl.readOnlyProperty
 
+    fun searchPaginationVisibleProperty(): ReadOnlyBooleanProperty = searchPaginationVisible.readOnlyProperty
+
+    fun canGoToPreviousSearchPageProperty(): ReadOnlyBooleanProperty = canGoToPreviousSearchPage.readOnlyProperty
+
+    fun canGoToNextSearchPageProperty(): ReadOnlyBooleanProperty = canGoToNextSearchPage.readOnlyProperty
+
     fun initialize(onError: (Throwable) -> Unit = {}) {
         reloadImports(onError = onError)
     }
 
-    fun setSearchScopeMode(mode: SearchScopeMode, onError: (Throwable) -> Unit = {}) {
-        if (searchScopeMode == mode) {
+    fun setSearchGroupName(groupName: String?, onError: (Throwable) -> Unit = {}) {
+        val normalizedGroupName = groupName?.trim()?.takeIf { it.isNotEmpty() }
+        if (searchGroupName == normalizedGroupName) {
             return
         }
 
-        searchScopeMode = mode
+        searchGroupName = normalizedGroupName
+        searchPageIndex = 0
+        rebuildCurrentView(onError, statusText = buildSearchProgressText(searchKeyword))
+    }
+
+    fun setSearchColumns(searchColumns: Boolean, onError: (Throwable) -> Unit = {}) {
+        if (this.searchColumns == searchColumns) {
+            return
+        }
+
+        this.searchColumns = searchColumns
+        searchPageIndex = 0
         rebuildCurrentView(onError, statusText = buildSearchProgressText(searchKeyword))
     }
 
@@ -251,6 +275,7 @@ class MainController(
     fun selectImport(importSummary: PdmImportSummary?, onError: (Throwable) -> Unit = {}) {
         scopedImportIds = importSummary?.let { listOf(it.id) } ?: emptyList()
         currentTableId = null
+        searchPageIndex = 0
         val importsSnapshot = imports.toList()
         val keyword = searchKeyword
         statusTextProperty.set(
@@ -277,6 +302,7 @@ class MainController(
     fun selectImportGroup(importSummaries: List<PdmImportSummary>, onError: (Throwable) -> Unit = {}) {
         scopedImportIds = importSummaries.map { it.id }.distinct()
         currentTableId = null
+        searchPageIndex = 0
         val importsSnapshot = imports.toList()
         val selectedImportSnapshot = selectedImport.get()
         statusTextProperty.set(
@@ -310,12 +336,31 @@ class MainController(
         updateSearchKeyword("", syncSelectionScope = true, onError = onError)
     }
 
+    fun goToPreviousSearchPage(onError: (Throwable) -> Unit = {}) {
+        if (searchPageIndex <= 0) {
+            return
+        }
+
+        searchPageIndex -= 1
+        rebuildCurrentView(onError, statusText = buildSearchProgressText(searchKeyword))
+    }
+
+    fun goToNextSearchPage(onError: (Throwable) -> Unit = {}) {
+        if (!canGoToNextSearchPage.get()) {
+            return
+        }
+
+        searchPageIndex += 1
+        rebuildCurrentView(onError, statusText = buildSearchProgressText(searchKeyword))
+    }
+
     private fun updateSearchKeyword(
         keyword: String,
         syncSelectionScope: Boolean,
         onError: (Throwable) -> Unit = {},
     ) {
         searchKeyword = keyword.trim()
+        searchPageIndex = 0
         val normalizedKeyword = searchKeyword
         val importsSnapshot = imports.toList()
         val selectedImportSnapshot = selectedImport.get()
@@ -381,6 +426,7 @@ class MainController(
         selectedImport.set(snapshot.selectedImport)
         navigationItems.setAll(snapshot.navigationItems)
         selectedNavigationItem.set(snapshot.selectedNavigationItem)
+        applySearchPage(snapshot.searchPage)
         if (snapshot.tableViewData == null) {
             clearTableDetails(clearCurrentTableSelection = snapshot.syncSelectionScope)
             statusTextProperty.set(snapshot.emptyStatusText)
@@ -391,6 +437,34 @@ class MainController(
             tableViewData = snapshot.tableViewData,
             highlightedColumnId = snapshot.highlightedColumnId,
             syncCurrentTableSelection = snapshot.syncSelectionScope,
+        )
+    }
+
+    private fun applySearchPage(searchPage: NavigationSearchPage?) {
+        if (searchPage == null) {
+            searchPageIndex = 0
+            searchPaginationVisible.set(false)
+            canGoToPreviousSearchPage.set(false)
+            canGoToNextSearchPage.set(false)
+            searchPageTextProperty.set("")
+            return
+        }
+
+        searchPageIndex = searchPage.pageIndex
+        val totalPages = if (searchPage.totalCount <= 0) {
+            0
+        } else {
+            (searchPage.totalCount - 1) / searchPage.pageSize + 1
+        }
+        searchPaginationVisible.set(true)
+        canGoToPreviousSearchPage.set(searchPage.pageIndex > 0)
+        canGoToNextSearchPage.set(searchPage.pageIndex + 1 < totalPages)
+        searchPageTextProperty.set(
+            if (totalPages == 0) {
+                "第 0 / 0 页 · 共 0 条"
+            } else {
+                "第 ${searchPage.pageIndex + 1} / $totalPages 页 · 共 ${searchPage.totalCount} 条"
+            }
         )
     }
 
@@ -460,6 +534,7 @@ class MainController(
                 highlightedColumnId = "",
                 emptyStatusText = emptyStatusText,
                 syncSelectionScope = syncSelectionScope,
+                searchPage = null,
             )
         }
 
@@ -477,36 +552,63 @@ class MainController(
                 highlightedColumnId = "",
                 emptyStatusText = emptyStatusText,
                 syncSelectionScope = syncSelectionScope,
+                searchPage = null,
             )
         }
 
         val effectiveSearchScope = resolveEffectiveSearchScope(
             keyword = searchKeyword,
-            selectedImport = normalizedSelectedImport,
-            scopedImportIds = normalizedScopedImportIds,
+            imports = imports,
         )
-        val currentTableScopeId = currentTableId
-            ?.takeIf { searchScopeMode == SearchScopeMode.CURRENT_SELECTION }
+        var searchPage: NavigationSearchPage? = null
         val navigationItems = if (searchKeyword.isBlank()) {
-            when {
-                currentTableScopeId != null -> catalogService.loadColumnNavigation(currentTableScopeId)
-                normalizedScopedImportIds.isNotEmpty() -> catalogService.loadNavigation(normalizedScopedImportIds)
-                normalizedSelectedImport != null -> catalogService.loadNavigation(normalizedSelectedImport.id, "")
-                else -> emptyList()
-            }
-        } else {
-            when (effectiveSearchScope) {
-                EffectiveSearchScope.GLOBAL -> catalogService.searchNavigation(searchKeyword)
-                is EffectiveSearchScope.IMPORTS -> catalogService.searchNavigation(
-                    keyword = searchKeyword,
+            val loadedNavigationPage = when {
+                effectiveSearchScope is EffectiveSearchScope.IMPORTS -> catalogService.loadNavigationPage(
                     importIds = effectiveSearchScope.importIds,
+                    pageIndex = searchPageIndex,
+                    pageSize = DEFAULT_SEARCH_PAGE_SIZE,
                 )
 
-                is EffectiveSearchScope.TABLE -> catalogService.searchNavigation(
-                    keyword = searchKeyword,
-                    tableId = effectiveSearchScope.tableId,
+                normalizedScopedImportIds.isNotEmpty() -> catalogService.loadNavigationPage(
+                    importIds = normalizedScopedImportIds,
+                    pageIndex = searchPageIndex,
+                    pageSize = DEFAULT_SEARCH_PAGE_SIZE,
+                )
+
+                normalizedSelectedImport != null -> catalogService.loadNavigationPage(
+                    importIds = listOf(normalizedSelectedImport.id),
+                    pageIndex = searchPageIndex,
+                    pageSize = DEFAULT_SEARCH_PAGE_SIZE,
+                )
+
+                else -> NavigationSearchPage(
+                    items = emptyList(),
+                    totalCount = 0,
+                    pageIndex = 0,
+                    pageSize = DEFAULT_SEARCH_PAGE_SIZE,
                 )
             }
+            searchPage = loadedNavigationPage
+            loadedNavigationPage.items
+        } else {
+            val loadedSearchPage = when (effectiveSearchScope) {
+                EffectiveSearchScope.GLOBAL -> catalogService.searchNavigationPage(
+                    keyword = searchKeyword,
+                    searchColumns = searchColumns,
+                    pageIndex = searchPageIndex,
+                    pageSize = DEFAULT_SEARCH_PAGE_SIZE,
+                )
+
+                is EffectiveSearchScope.IMPORTS -> catalogService.searchNavigationPage(
+                    keyword = searchKeyword,
+                    importIds = effectiveSearchScope.importIds,
+                    searchColumns = searchColumns,
+                    pageIndex = searchPageIndex,
+                    pageSize = DEFAULT_SEARCH_PAGE_SIZE,
+                )
+            }
+            searchPage = loadedSearchPage
+            loadedSearchPage.items
         }
         if (navigationItems.isEmpty()) {
             return ViewSnapshot(
@@ -517,11 +619,12 @@ class MainController(
                 tableViewData = null,
                 highlightedColumnId = "",
                 emptyStatusText = if (searchKeyword.isBlank()) {
-                    buildEmptyNavigationStatusText(currentTableScopeId, normalizedScopedImportIds, normalizedSelectedImport)
+                    buildEmptyNavigationStatusText(effectiveSearchScope, normalizedScopedImportIds, normalizedSelectedImport)
                 } else {
-                    "未在${describeSearchScope(effectiveSearchScope, imports)}中找到与“$searchKeyword”匹配的表或字段。"
+                    "未在${describeSearchScope(effectiveSearchScope)}中找到与“$searchKeyword”匹配的${searchTargetName()}。"
                 },
                 syncSelectionScope = syncSelectionScope,
+                searchPage = searchPage,
             )
         }
 
@@ -542,11 +645,12 @@ class MainController(
                 tableViewData = null,
                 highlightedColumnId = "",
                 emptyStatusText = if (searchKeyword.isBlank()) {
-                    buildEmptyNavigationStatusText(currentTableScopeId, normalizedScopedImportIds, normalizedSelectedImport)
+                    buildEmptyNavigationStatusText(effectiveSearchScope, normalizedScopedImportIds, normalizedSelectedImport)
                 } else {
-                    "未在${describeSearchScope(effectiveSearchScope, imports)}中找到与“$searchKeyword”匹配的表或字段。"
+                    "未在${describeSearchScope(effectiveSearchScope)}中找到与“$searchKeyword”匹配的${searchTargetName()}。"
                 },
                 syncSelectionScope = syncSelectionScope,
+                searchPage = searchPage,
             )
         }
 
@@ -566,16 +670,17 @@ class MainController(
             highlightedColumnId = preferredItem.matchedColumnIdInPdm.orEmpty(),
             emptyStatusText = "",
             syncSelectionScope = syncSelectionScope,
+            searchPage = searchPage,
         )
     }
 
     private fun buildEmptyNavigationStatusText(
-        currentTableScopeId: Long?,
+        effectiveSearchScope: EffectiveSearchScope,
         scopedImportIds: List<Long>,
         selectedImport: PdmImportSummary?,
     ): String =
         when {
-            currentTableScopeId != null -> "当前表中没有可展示的字段。"
+            effectiveSearchScope is EffectiveSearchScope.IMPORTS -> "${describeSearchScope(effectiveSearchScope)}中没有可展示的表。"
             scopedImportIds.size > 1 -> "当前分组中没有可展示的表。"
             selectedImport != null -> "文件 ${selectedImport.fileName} 中没有可展示的表。"
             else -> "当前没有已导入的 PDM 元数据。"
@@ -583,55 +688,46 @@ class MainController(
 
     private fun resolveEffectiveSearchScope(
         keyword: String,
-        selectedImport: PdmImportSummary?,
-        scopedImportIds: List<Long>,
+        imports: List<PdmImportSummary>,
     ): EffectiveSearchScope {
-        if (keyword.isBlank()) {
+        val normalizedSearchGroupName = searchGroupName?.trim()?.takeIf { it.isNotEmpty() }
+        if (keyword.isBlank() && normalizedSearchGroupName == null) {
             return EffectiveSearchScope.GLOBAL
         }
 
-        if (searchScopeMode == SearchScopeMode.GLOBAL) {
-            return EffectiveSearchScope.GLOBAL
-        }
-
-        currentTableId?.let { tableId ->
-            return EffectiveSearchScope.TABLE(tableId)
-        }
-
-        if (scopedImportIds.isNotEmpty()) {
-            return EffectiveSearchScope.IMPORTS(scopedImportIds)
-        }
-
-        selectedImport?.let { importSummary ->
-            return EffectiveSearchScope.IMPORTS(listOf(importSummary.id))
+        normalizedSearchGroupName?.let { groupName ->
+            return EffectiveSearchScope.IMPORTS(
+                importIds = imports
+                    .filter { importSummary -> importSummary.groupName == groupName }
+                    .map { importSummary -> importSummary.id },
+                groupName = groupName,
+            )
         }
 
         return EffectiveSearchScope.GLOBAL
     }
 
-    private fun describeSearchScope(scope: EffectiveSearchScope, imports: List<PdmImportSummary>): String =
+    private fun describeSearchScope(scope: EffectiveSearchScope): String =
         when (scope) {
             EffectiveSearchScope.GLOBAL -> "全部已导入的 PDM"
-            is EffectiveSearchScope.IMPORTS -> {
-                if (scope.importIds.size == 1) {
-                    val targetImport = imports.firstOrNull { it.id == scope.importIds.first() }
-                    targetImport?.fileName?.let { "文件 $it" } ?: "当前选中文件"
-                } else {
-                    "当前选中分组"
-                }
-            }
-
-            is EffectiveSearchScope.TABLE -> "当前选中表"
+            is EffectiveSearchScope.IMPORTS -> "分组 ${scope.groupName}"
         }
 
     private fun buildSearchProgressText(keyword: String): String =
         if (keyword.isBlank()) {
             "正在加载表清单..."
-        } else if (searchScopeMode == SearchScopeMode.GLOBAL) {
-            "正在搜索全部已导入 PDM 中的“$keyword”..."
         } else {
-            "正在搜索当前选中范围中的“$keyword”..."
+            "正在${describeConfiguredSearchScope()}中${describeSearchAction()}“$keyword”..."
         }
+
+    private fun describeSearchAction(): String =
+        if (searchColumns) "搜索字段" else "搜索表"
+
+    private fun searchTargetName(): String =
+        if (searchColumns) "字段" else "表"
+
+    private fun describeConfiguredSearchScope(): String =
+        searchGroupName?.let { "分组 $it" } ?: "全部已导入 PDM"
 
     private fun rebuildCurrentView(
         onError: (Throwable) -> Unit,
@@ -723,6 +819,7 @@ class MainController(
 
     companion object {
         private val DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+        private const val DEFAULT_SEARCH_PAGE_SIZE = 50
     }
 
     private data class ViewSnapshot(
@@ -734,6 +831,7 @@ class MainController(
         val highlightedColumnId: String,
         val emptyStatusText: String,
         val syncSelectionScope: Boolean,
+        val searchPage: NavigationSearchPage? = null,
     )
 
     private data class TableSelectionSnapshot(
@@ -744,8 +842,6 @@ class MainController(
     private sealed interface EffectiveSearchScope {
         data object GLOBAL : EffectiveSearchScope
 
-        data class IMPORTS(val importIds: List<Long>) : EffectiveSearchScope
-
-        data class TABLE(val tableId: Long) : EffectiveSearchScope
+        data class IMPORTS(val importIds: List<Long>, val groupName: String) : EffectiveSearchScope
     }
 }

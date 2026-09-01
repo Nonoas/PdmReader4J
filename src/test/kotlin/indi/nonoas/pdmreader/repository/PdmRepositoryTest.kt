@@ -2,6 +2,9 @@ package indi.nonoas.pdmreader.repository
 
 import indi.nonoas.pdmreader.ddl.DdlGenerator
 import indi.nonoas.pdmreader.model.NavigationItemType
+import indi.nonoas.pdmreader.model.ParsedPdmColumn
+import indi.nonoas.pdmreader.model.ParsedPdmModel
+import indi.nonoas.pdmreader.model.ParsedPdmTable
 import indi.nonoas.pdmreader.parser.PowerDesignerPdmParser
 import indi.nonoas.pdmreader.service.PdmCatalogService
 import java.nio.file.Files
@@ -49,11 +52,14 @@ class PdmRepositoryTest {
         )
 
         val searchByColumn = service.searchNavigation("name")
-        assertEquals(2, searchByColumn.size)
-        assertTrue(searchByColumn.all { it.matchedColumnCode == "NAME" })
-        assertEquals(setOf(secondImport.id, thirdImport.id), searchByColumn.map { it.importId }.toSet())
+        assertTrue(searchByColumn.isEmpty())
 
-        val scopedSearchByImport = service.searchNavigation("name", importIds = listOf(secondImport.id))
+        val searchByColumnEnabled = service.searchNavigation("name", searchColumns = true)
+        assertEquals(2, searchByColumnEnabled.size)
+        assertTrue(searchByColumnEnabled.all { it.matchedColumnCode == "NAME" })
+        assertEquals(setOf(secondImport.id, thirdImport.id), searchByColumnEnabled.map { it.importId }.toSet())
+
+        val scopedSearchByImport = service.searchNavigation("name", importIds = listOf(secondImport.id), searchColumns = true)
         assertEquals(1, scopedSearchByImport.size)
         assertEquals(secondImport.id, scopedSearchByImport.single().importId)
 
@@ -84,6 +90,92 @@ class PdmRepositoryTest {
 
         assertEquals(2, service.deleteImports(listOf(secondImport.id, thirdImport.id)))
         assertTrue(service.listImports().isEmpty())
+    }
+
+    @Test
+    fun shouldPageSearchResults() {
+        val tempDir = createTempDirectory("pdm-reader-page-test")
+        val databaseFactory = DatabaseFactory(tempDir.resolve("catalog"))
+        val repository = PdmRepository(databaseFactory)
+        val service = PdmCatalogService(PowerDesignerPdmParser(), repository, DdlGenerator())
+        val pagedImport = repository.replaceImport(
+            filePath = tempDir.resolve("paged-sample.pdm"),
+            fileHash = "test-hash",
+            parsedModel = ParsedPdmModel(
+                modelName = "PagedSample",
+                targetDb = "Oracle",
+                tables = List(55) { index ->
+                    ParsedPdmTable(
+                        idInPdm = "t$index",
+                        name = "分页示例表$index",
+                        code = "SAMPLE_TABLE_${index.toString().padStart(2, '0')}",
+                        comment = null,
+                        columns = listOf(
+                            ParsedPdmColumn(
+                                idInPdm = "c$index",
+                                name = "主键$index",
+                                code = "ID_$index",
+                                dataType = "NUMBER",
+                                length = null,
+                                precision = 18,
+                                scale = 0,
+                                nullable = false,
+                                defaultValue = null,
+                                comment = null,
+                                ordinalPosition = 1,
+                            )
+                        ),
+                        primaryKeyColumnIds = listOf("c$index"),
+                    )
+                },
+            ),
+        )
+
+        val firstNavigationPage = service.loadNavigationPage(
+            importIds = listOf(pagedImport.id),
+            pageIndex = 0,
+            pageSize = 50,
+        )
+        assertEquals(55, firstNavigationPage.totalCount)
+        assertEquals(50, firstNavigationPage.items.size)
+        assertEquals(0, firstNavigationPage.pageIndex)
+
+        val secondNavigationPage = service.loadNavigationPage(
+            importIds = listOf(pagedImport.id),
+            pageIndex = 1,
+            pageSize = 50,
+        )
+        assertEquals(55, secondNavigationPage.totalCount)
+        assertEquals(5, secondNavigationPage.items.size)
+        assertEquals(1, secondNavigationPage.pageIndex)
+
+        val firstPage = service.searchNavigationPage(
+            keyword = "sample",
+            pageIndex = 0,
+            pageSize = 50,
+        )
+        assertEquals(55, firstPage.totalCount)
+        assertEquals(50, firstPage.items.size)
+        assertEquals(0, firstPage.pageIndex)
+        assertEquals(50, firstPage.pageSize)
+
+        val secondPage = service.searchNavigationPage(
+            keyword = "sample",
+            pageIndex = 1,
+            pageSize = 50,
+        )
+        assertEquals(55, secondPage.totalCount)
+        assertEquals(5, secondPage.items.size)
+        assertEquals(1, secondPage.pageIndex)
+
+        val boundedPage = service.searchNavigationPage(
+            keyword = "sample",
+            pageIndex = 20,
+            pageSize = 50,
+        )
+        assertEquals(55, boundedPage.totalCount)
+        assertEquals(5, boundedPage.items.size)
+        assertEquals(1, boundedPage.pageIndex)
     }
 
     private fun fixturePath(resourcePath: String): Path =

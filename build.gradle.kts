@@ -4,6 +4,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 
 val myMainClass: String by project
 val javafxPreviewJvmArgs = listOf("-Djavafx.enablePreview=true")
+val jfxTextSmoothJvmArgs = listOf("-Dprism.lcdtext=false", "-Dprism.text=t2k")
 
 buildscript {
     repositories {
@@ -58,7 +59,7 @@ dependencies {
 
 application {
     mainClass.set(myMainClass)
-    applicationDefaultJvmArgs = listOf("-Dfile.encoding=UTF-8") + javafxPreviewJvmArgs
+    applicationDefaultJvmArgs = listOf("-Dfile.encoding=UTF-8") + javafxPreviewJvmArgs + jfxTextSmoothJvmArgs
 }
 
 tasks.withType<JavaCompile>().configureEach {
@@ -82,6 +83,7 @@ tasks.register<PackageTask>("packageMyApp") {
     vmArgs = listOf(
         "-Dfile.encoding=UTF-8",
         *javafxPreviewJvmArgs.toTypedArray(),
+        *jfxTextSmoothJvmArgs.toTypedArray(),
         "--add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED"
     )
 

@@ -1,18 +1,18 @@
 .root,
 .app-shell {
     -fx-font-smoothing-type: lcd;
-    /*    -app-surface: -color-bg-overlay;*/
-    /*    -app-surface-alt: -color-bg-subtle;*/
-    /*    -app-surface-muted: -color-neutral-subtle;*/
+    -app-surface: -color-bg-default;
+    -app-surface-alt: -color-cell-bg-selected;
+    -app-surface-muted: -color-bg-default;
     -app-border: -color-border-default;
-    /*    -app-border-strong: -color-border-muted;*/
+    -app-border-strong: -color-border-default;
     -app-text: -color-fg-default;
     -app-text-muted: -color-fg-muted;
     -app-text-subtle: -color-fg-subtle;
     -app-accent: -color-accent-emphasis;
     /*    -app-accent-hover: -color-accent-fg;*/
     /*    -app-accent-pressed: -color-accent-6;*/
-    /*    -app-selection: -color-accent-muted;*/
+    -app-selection: -color-cell-bg-selected;
     -fx-font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
     -fx-font-size: 13px;
     /*    -fx-background-color: -color-bg-default;*/
@@ -375,6 +375,23 @@
 
 .navigation-list .list-cell:filled:selected .list-item-box {
     -fx-background-color: -color-cell-bg-selected;
+}
+
+.pagination-bar {
+    -fx-padding: 4 0 0 0;
+}
+
+.pagination-button {
+    -fx-padding: 0;
+}
+
+.pagination-arrow {
+    -fx-fill: -app-text-muted;
+}
+
+.pagination-label {
+    -fx-font-size: 11px;
+    -fx-text-fill: -app-text-muted;
 }
 
 .table-row-cell {

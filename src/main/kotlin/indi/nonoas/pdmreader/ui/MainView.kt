@@ -7,7 +7,7 @@ import github.nonoas.jfx.flat.ui.theme.Theme
 import indi.nonoas.pdmreader.app.AppThemeManager
 import indi.nonoas.pdmreader.controller.MainController
 import indi.nonoas.pdmreader.model.NavigationItemType
-import indi.nonoas.pdmreader.model.SearchScopeMode
+import indi.nonoas.pdmreader.model.PdmImportSummary
 import indi.nonoas.pdmreader.model.TableNavigationItem
 import indi.nonoas.pdmreader.service.PdmCatalogService
 import javafx.application.Platform
@@ -23,6 +23,7 @@ import javafx.scene.control.*
 import javafx.scene.input.MouseButton
 import javafx.scene.input.MouseEvent
 import javafx.scene.layout.*
+import javafx.scene.shape.Polygon
 import javafx.stage.FileChooser
 import javafx.stage.Stage
 import javafx.util.Callback
@@ -51,6 +52,7 @@ class MainView(
     companion object {
         const val APP_VERSION = "0.0.1"
         const val GITHUB_REPO = "Nonoas/PdmReader4J"
+        const val GLOBAL_GROUP_OPTION = "全局"
         val PAGE_PADDING = Insets(12.0)
         val SECTION_PADDING = Insets(10.0)
     }
@@ -58,7 +60,7 @@ class MainView(
     fun createContent(): BorderPane {
         var suppressSearchFieldChange = false
         val searchField = TextField().apply {
-            promptText = "搜索表名、表编码、字段名或字段编码"
+            promptText = "搜索表名或表编码"
             styleClass.add("search-input")
             textProperty().addListener { _, _, newValue ->
                 if (suppressSearchFieldChange) {
@@ -68,39 +70,54 @@ class MainView(
             }
             HBox.setHgrow(this, Priority.ALWAYS)
         }
-        val searchScopeComboBox = ComboBox<SearchScopeMode>().apply {
-            items.addAll(SearchScopeMode.CURRENT_SELECTION, SearchScopeMode.GLOBAL)
-            value = SearchScopeMode.GLOBAL
-            converter = object : StringConverter<SearchScopeMode>() {
-                override fun toString(scope: SearchScopeMode?): String = when (scope) {
-                    SearchScopeMode.CURRENT_SELECTION -> "当前选中范围"
-                    SearchScopeMode.GLOBAL -> "全局"
-                    null -> ""
-                }
-
-                override fun fromString(text: String?): SearchScopeMode? =
-                    items.firstOrNull { toString(it) == text }
-            }
-            buttonCell = object : ListCell<SearchScopeMode>() {
-                init {
-                    textProperty().bind(Bindings.createStringBinding({
-                        val currentItem: SearchScopeMode? = item
-                        when (currentItem) {
-                            SearchScopeMode.CURRENT_SELECTION -> selectionContextProperty.get()
-                            SearchScopeMode.GLOBAL -> "全局"
-                            null -> ""
-                        }
-                    }, selectionContextProperty, itemProperty()))
-                }
-            }
+        var suppressSearchGroupChange = false
+        val searchGroupComboBox = ComboBox<String>().apply {
+            items.add(GLOBAL_GROUP_OPTION)
+            value = GLOBAL_GROUP_OPTION
+            visibleRowCount = 8
             prefWidth = 210.0
             styleClass.add("toolbar-combo")
-            tooltip = Tooltip("当前选中支持分组、单个 PDM 文件和表；全局会搜索全部已导入内容")
+            tooltip = Tooltip("按分组过滤搜索；全局会搜索全部已导入内容")
             selectionModel.selectedItemProperty().addListener { _, _, newValue ->
-                newValue?.let { controller.setSearchScopeMode(it, ::showError) }
+                if (!suppressSearchGroupChange) {
+                    controller.setSearchGroupName(newValue?.takeIf { it != GLOBAL_GROUP_OPTION }, ::showError)
+                }
             }
 
             HBox.setHgrow(this, Priority.ALWAYS)
+        }
+        fun refreshSearchGroups() {
+            val groupNames = controller.imports
+                .map { importSummary -> normalizedGroupName(importSummary) }
+                .distinct()
+                .sortedWith(String.CASE_INSENSITIVE_ORDER)
+            val currentValue = searchGroupComboBox.value
+                ?.takeIf { it == GLOBAL_GROUP_OPTION || it in groupNames }
+                ?: GLOBAL_GROUP_OPTION
+
+            suppressSearchGroupChange = true
+            try {
+                searchGroupComboBox.items.setAll(listOf(GLOBAL_GROUP_OPTION) + groupNames)
+                searchGroupComboBox.selectionModel.select(currentValue)
+            } finally {
+                suppressSearchGroupChange = false
+            }
+            controller.setSearchGroupName(currentValue.takeIf { it != GLOBAL_GROUP_OPTION }, ::showError)
+        }
+        controller.imports.addListener(ListChangeListener<PdmImportSummary> { refreshSearchGroups() })
+        refreshSearchGroups()
+
+        val searchColumnsCheckBox = CheckBox("查字段").apply {
+            isSelected = false
+            tooltip = Tooltip("未勾选时搜索表；勾选后搜索字段")
+            selectedProperty().addListener { _, _, selected ->
+                searchField.promptText = if (selected) {
+                    "搜索字段名或字段编码"
+                } else {
+                    "搜索表名或表编码"
+                }
+                controller.setSearchColumns(selected, ::showError)
+            }
         }
 
         val importButton = Button("导入 PDM").apply {
@@ -135,10 +152,11 @@ class MainView(
             }
         }
         val themeSwitcher = createThemeSwitcher()
-        val searchScopeSwitcher = HBox(
+        val searchGroupSwitcher = HBox(
             6.0,
-            Label("范围").apply { styleClass.add("field-label") },
-            searchScopeComboBox,
+            Label("分组").apply { styleClass.add("field-label") },
+            searchGroupComboBox,
+            searchColumnsCheckBox,
         ).apply {
             alignment = Pos.CENTER_LEFT
             styleClass.add("toolbar-group")
@@ -148,7 +166,7 @@ class MainView(
             8.0,
             importButton,
             refreshButton,
-            searchScopeSwitcher,
+            searchGroupSwitcher,
             searchField,
             clearSearchButton,
             themeSwitcher,
@@ -186,6 +204,13 @@ class MainView(
 
         val importTreePane = ImportTreePane(controller, ::showError, selectionContextProperty::set)
         val navigationListView = createNavigationListView(tableTabPane, importTreePane)
+        val navigationPane = VBox(
+            6.0,
+            navigationListView,
+            createSearchPaginationBar(),
+        ).apply {
+            VBox.setVgrow(navigationListView, Priority.ALWAYS)
+        }
 
         val rightPane = StackPane(
             tableTabPane,
@@ -205,7 +230,7 @@ class MainView(
         val leftPane = VBox(
             8.0,
             createSectionPane("已导入文件", importTreePane),
-            createSectionPane("表与搜索结果", navigationListView),
+            createSectionPane("表与搜索结果", navigationPane),
         ).apply {
             prefWidth = 320.0
             padding = PAGE_PADDING
@@ -336,7 +361,7 @@ class MainView(
         ListView(controller.navigationItems).apply {
             val applyingControllerSelection = booleanArrayOf(false)
             selectionModel.selectionMode = SelectionMode.SINGLE
-            placeholder = Label("选择分组或文件后显示表清单，输入关键字后可按当前选中范围或全局搜索")
+            placeholder = Label("选择分组或文件后显示表清单，输入关键字后可按分组搜索表或字段")
             styleClass.addAll("compact-list", "navigation-list")
             cellFactory = Callback {
                 object : ListCell<TableNavigationItem>() {
@@ -452,6 +477,55 @@ class MainView(
             bindSelection(controller.selectedNavigationItemProperty(), applyingControllerSelection)
         }
 
+    private fun createSearchPaginationBar(): HBox {
+        val previousButton = Button().apply {
+            graphic = createPaginationArrow(left = true)
+            tooltip = Tooltip("上一页")
+            accessibleText = "上一页"
+            styleClass.add("pagination-button")
+            minWidth = 32.0
+            prefWidth = 32.0
+            disableProperty().bind(controller.canGoToPreviousSearchPageProperty().not())
+            setOnAction {
+                controller.goToPreviousSearchPage(::showError)
+            }
+        }
+        val nextButton = Button().apply {
+            graphic = createPaginationArrow(left = false)
+            tooltip = Tooltip("下一页")
+            accessibleText = "下一页"
+            styleClass.add("pagination-button")
+            minWidth = 32.0
+            prefWidth = 32.0
+            disableProperty().bind(controller.canGoToNextSearchPageProperty().not())
+            setOnAction {
+                controller.goToNextSearchPage(::showError)
+            }
+        }
+        val pageLabel = Label().apply {
+            textProperty().bind(controller.searchPageTextProperty)
+            maxWidth = Double.MAX_VALUE
+            styleClass.add("pagination-label")
+            HBox.setHgrow(this, Priority.ALWAYS)
+        }
+
+        return HBox(6.0, previousButton, pageLabel, nextButton).apply {
+            alignment = Pos.CENTER_LEFT
+            styleClass.add("pagination-bar")
+            visibleProperty().bind(controller.searchPaginationVisibleProperty())
+            managedProperty().bind(visibleProperty())
+        }
+    }
+
+    private fun createPaginationArrow(left: Boolean): Polygon =
+        if (left) {
+            Polygon(8.0, 0.0, 0.0, 5.0, 8.0, 10.0)
+        } else {
+            Polygon(0.0, 0.0, 8.0, 5.0, 0.0, 10.0)
+        }.apply {
+            styleClass.add("pagination-arrow")
+        }
+
     private fun activateNavigationItem(tableTabPane: TabPane, item: TableNavigationItem) {
         val tableCode = item.tableCode?.takeIf { it.isNotBlank() } ?: item.tableName
         selectionContextProperty.set(tableCode)
@@ -510,6 +584,9 @@ class MainView(
             else -> File(System.getProperty("user.home"))
         }
     }
+
+    private fun normalizedGroupName(importSummary: PdmImportSummary): String =
+        importSummary.groupName.trim().ifBlank { "未分组" }
 
     private fun showError(exception: Throwable) {
         logger.error(exception.message, exception)

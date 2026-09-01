@@ -3,6 +3,7 @@ package indi.nonoas.pdmreader.repository
 import indi.nonoas.pdmreader.model.*
 import java.nio.file.Path
 import java.sql.Connection
+import java.sql.PreparedStatement
 import java.sql.Statement
 import java.time.LocalDateTime
 import java.util.logging.Logger
@@ -11,6 +12,16 @@ class PdmRepository(
     private val databaseFactory: DatabaseFactory,
 ) {
     private val logger = Logger.getLogger(PdmRepository::class.java.name)
+
+    companion object {
+        private val SEARCH_NAVIGATION_ORDER_BY = """
+            order by sort_order,
+                     upper(coalesce(group_name, '')),
+                     upper(file_name),
+                     upper(coalesce(table_code, table_name)),
+                     upper(coalesce(column_code, column_name))
+        """.trimIndent()
+    }
 
     init {
         initializeSchema()
@@ -232,6 +243,71 @@ class PdmRepository(
         }
     }
 
+    fun listTableNavigationPage(
+        importIds: Collection<Long>,
+        pageIndex: Int,
+        pageSize: Int,
+    ): NavigationSearchPage {
+        val normalizedIds = importIds.distinct()
+        val normalizedPageSize = pageSize.coerceAtLeast(1)
+        if (normalizedIds.isEmpty()) {
+            return NavigationSearchPage(
+                items = emptyList(),
+                totalCount = 0,
+                pageIndex = 0,
+                pageSize = normalizedPageSize,
+            )
+        }
+
+        val placeholders = normalizedIds.joinToString(",") { "?" }
+        val tableSql = buildTableNavigationQuery(placeholders)
+        return databaseFactory.openConnection().use { connection ->
+            val totalCount = connection.prepareStatement(
+                """
+                select count(*)
+                from ($tableSql) result
+                """.trimIndent()
+            ).use { statement ->
+                bindImportIds(statement, 1, normalizedIds)
+                statement.executeQuery().use { resultSet ->
+                    if (resultSet.next()) resultSet.getInt(1) else 0
+                }
+            }
+            val resolvedPageIndex = if (totalCount <= 0) {
+                0
+            } else {
+                pageIndex.coerceAtLeast(0).coerceAtMost((totalCount - 1) / normalizedPageSize)
+            }
+            val offset = resolvedPageIndex * normalizedPageSize
+            val items = connection.prepareStatement(
+                """
+                select *
+                from ($tableSql) result
+                $SEARCH_NAVIGATION_ORDER_BY
+                offset ? rows fetch next ? rows only
+                """.trimIndent()
+            ).use { statement ->
+                val nextIndex = bindImportIds(statement, 1, normalizedIds)
+                statement.setInt(nextIndex, offset)
+                statement.setInt(nextIndex + 1, normalizedPageSize)
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            add(resultSet.toTableNavigationItem())
+                        }
+                    }
+                }
+            }
+
+            NavigationSearchPage(
+                items = items,
+                totalCount = totalCount,
+                pageIndex = resolvedPageIndex,
+                pageSize = normalizedPageSize,
+            )
+        }
+    }
+
     fun listColumnNavigation(tableId: Long): List<TableNavigationItem> =
         databaseFactory.openConnection().use { connection ->
             connection.prepareStatement(
@@ -285,7 +361,92 @@ class PdmRepository(
         keyword: String,
         importIds: Collection<Long> = emptyList(),
         tableId: Long? = null,
-    ): List<TableNavigationItem> {
+        searchColumns: Boolean = false,
+    ): List<TableNavigationItem> =
+        databaseFactory.openConnection().use { connection ->
+            val query = buildSearchNavigationQuery(keyword, importIds, tableId, searchColumns)
+            connection.prepareStatement(
+                """
+                select *
+                from (${query.sql}) result
+                $SEARCH_NAVIGATION_ORDER_BY
+                """.trimIndent()
+            ).use { statement ->
+                bindSearchNavigationParameters(statement, query)
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            add(resultSet.toTableNavigationItem())
+                        }
+                    }
+                }
+            }
+        }
+
+    fun searchNavigationPage(
+        keyword: String,
+        importIds: Collection<Long> = emptyList(),
+        tableId: Long? = null,
+        searchColumns: Boolean = false,
+        pageIndex: Int,
+        pageSize: Int,
+    ): NavigationSearchPage {
+        val normalizedPageSize = pageSize.coerceAtLeast(1)
+        val query = buildSearchNavigationQuery(keyword, importIds, tableId, searchColumns)
+
+        return databaseFactory.openConnection().use { connection ->
+            val totalCount = connection.prepareStatement(
+                """
+                select count(*)
+                from (${query.sql}) result
+                """.trimIndent()
+            ).use { statement ->
+                bindSearchNavigationParameters(statement, query)
+                statement.executeQuery().use { resultSet ->
+                    if (resultSet.next()) resultSet.getInt(1) else 0
+                }
+            }
+            val resolvedPageIndex = if (totalCount <= 0) {
+                0
+            } else {
+                pageIndex.coerceAtLeast(0).coerceAtMost((totalCount - 1) / normalizedPageSize)
+            }
+            val offset = resolvedPageIndex * normalizedPageSize
+            val items = connection.prepareStatement(
+                """
+                select *
+                from (${query.sql}) result
+                $SEARCH_NAVIGATION_ORDER_BY
+                offset ? rows fetch next ? rows only
+                """.trimIndent()
+            ).use { statement ->
+                val nextIndex = bindSearchNavigationParameters(statement, query)
+                statement.setInt(nextIndex, offset)
+                statement.setInt(nextIndex + 1, normalizedPageSize)
+                statement.executeQuery().use { resultSet ->
+                    buildList {
+                        while (resultSet.next()) {
+                            add(resultSet.toTableNavigationItem())
+                        }
+                    }
+                }
+            }
+
+            NavigationSearchPage(
+                items = items,
+                totalCount = totalCount,
+                pageIndex = resolvedPageIndex,
+                pageSize = normalizedPageSize,
+            )
+        }
+    }
+
+    private fun buildSearchNavigationQuery(
+        keyword: String,
+        importIds: Collection<Long>,
+        tableId: Long?,
+        searchColumns: Boolean,
+    ): SearchNavigationQuery {
         val likeKeyword = "%${keyword.trim().lowercase()}%"
         val normalizedImportIds = importIds.distinct()
         val scopeClause = when {
@@ -297,94 +458,66 @@ class PdmRepository(
 
             else -> ""
         }
-        return databaseFactory.openConnection().use { connection ->
-            connection.prepareStatement(
-                """
-                select *
-                from (
-                    select 0 as sort_order,
-                           'TABLE' as match_type,
-                           i.id as import_id,
-                           i.file_name,
-                           i.file_path,
-                           i.group_name,
-                           t.id as table_id,
-                           t.table_name,
-                           t.table_code,
-                           t.table_comment,
-                           cast(null as varchar(255)) as column_id_in_pdm,
-                           cast(null as varchar(255)) as column_name,
-                           cast(null as varchar(255)) as column_code
-                    from pdm_table t
-                    join import_file i on i.id = t.import_file_id
-                    where (lower(coalesce(t.table_name, '')) like ? or lower(coalesce(t.table_code, '')) like ?)$scopeClause
-
-                    union all
-
-                    select 1 as sort_order,
-                           'COLUMN' as match_type,
-                           i.id as import_id,
-                           i.file_name,
-                           i.file_path,
-                           i.group_name,
-                           t.id as table_id,
-                           t.table_name,
-                           t.table_code,
-                           t.table_comment,
-                           c.column_id_in_pdm,
-                           c.column_name,
-                           c.column_code
-                    from pdm_column c
-                    join pdm_table t on t.id = c.table_id
-                    join import_file i on i.id = t.import_file_id
-                    where (lower(coalesce(c.column_name, '')) like ? or lower(coalesce(c.column_code, '')) like ?)$scopeClause
-                ) result
-                order by sort_order,
-                         upper(coalesce(group_name, '')),
-                         upper(file_name),
-                         upper(coalesce(table_code, table_name)),
-                         upper(coalesce(column_code, column_name))
-                """.trimIndent()
-            ).use { statement ->
-                var parameterIndex = 1
-                statement.setString(parameterIndex++, likeKeyword)
-                statement.setString(parameterIndex++, likeKeyword)
-                parameterIndex = bindSearchScopeParameters(statement, parameterIndex, normalizedImportIds, tableId)
-                statement.setString(parameterIndex++, likeKeyword)
-                statement.setString(parameterIndex++, likeKeyword)
-                bindSearchScopeParameters(statement, parameterIndex, normalizedImportIds, tableId)
-                statement.executeQuery().use { resultSet ->
-                    buildList {
-                        while (resultSet.next()) {
-                            add(
-                                TableNavigationItem(
-                                    type = if (resultSet.getString("match_type") == "COLUMN") {
-                                        NavigationItemType.COLUMN_MATCH
-                                    } else {
-                                        NavigationItemType.TABLE
-                                    },
-                                    importId = resultSet.getLong("import_id"),
-                                    importFileName = resultSet.getString("file_name"),
-                                    importFilePath = resultSet.getString("file_path"),
-                                    importGroupName = resultSet.normalizedGroupName(),
-                                    tableId = resultSet.getLong("table_id"),
-                                    tableName = resultSet.getString("table_name"),
-                                    tableCode = resultSet.getString("table_code"),
-                                    tableComment = resultSet.getString("table_comment"),
-                                    matchedColumnIdInPdm = resultSet.getString("column_id_in_pdm"),
-                                    matchedColumnName = resultSet.getString("column_name"),
-                                    matchedColumnCode = resultSet.getString("column_code"),
-                                )
-                            )
-                        }
-                    }
-                }
-            }
+        val searchSql = if (searchColumns) {
+            """
+            select 1 as sort_order,
+                   'COLUMN' as match_type,
+                   i.id as import_id,
+                   i.file_name,
+                   i.file_path,
+                   i.group_name,
+                   t.id as table_id,
+                   t.table_name,
+                   t.table_code,
+                   t.table_comment,
+                   c.column_id_in_pdm,
+                   c.column_name,
+                   c.column_code
+            from pdm_column c
+            join pdm_table t on t.id = c.table_id
+            join import_file i on i.id = t.import_file_id
+            where (lower(coalesce(c.column_name, '')) like ? or lower(coalesce(c.column_code, '')) like ?)$scopeClause
+            """.trimIndent()
+        } else {
+            """
+            select 0 as sort_order,
+                   'TABLE' as match_type,
+                   i.id as import_id,
+                   i.file_name,
+                   i.file_path,
+                   i.group_name,
+                   t.id as table_id,
+                   t.table_name,
+                   t.table_code,
+                   t.table_comment,
+                   cast(null as varchar(255)) as column_id_in_pdm,
+                   cast(null as varchar(255)) as column_name,
+                   cast(null as varchar(255)) as column_code
+            from pdm_table t
+            join import_file i on i.id = t.import_file_id
+            where (lower(coalesce(t.table_name, '')) like ? or lower(coalesce(t.table_code, '')) like ?)$scopeClause
+            """.trimIndent()
         }
+        return SearchNavigationQuery(
+            sql = searchSql,
+            likeKeyword = likeKeyword,
+            importIds = normalizedImportIds,
+            tableId = tableId,
+        )
+    }
+
+    private fun bindSearchNavigationParameters(
+        statement: PreparedStatement,
+        query: SearchNavigationQuery,
+    ): Int {
+        var parameterIndex = 1
+        statement.setString(parameterIndex++, query.likeKeyword)
+        statement.setString(parameterIndex++, query.likeKeyword)
+        return bindSearchScopeParameters(statement, parameterIndex, query.importIds, query.tableId)
     }
 
     private fun bindSearchScopeParameters(
-        statement: java.sql.PreparedStatement,
+        statement: PreparedStatement,
         startIndex: Int,
         importIds: List<Long>,
         tableId: Long?,
@@ -398,6 +531,58 @@ class PdmRepository(
         }
         return parameterIndex
     }
+
+    private fun bindImportIds(
+        statement: PreparedStatement,
+        startIndex: Int,
+        importIds: List<Long>,
+    ): Int {
+        var parameterIndex = startIndex
+        importIds.forEach { importId ->
+            statement.setLong(parameterIndex++, importId)
+        }
+        return parameterIndex
+    }
+
+    private fun buildTableNavigationQuery(placeholders: String): String =
+        """
+        select 0 as sort_order,
+               'TABLE' as match_type,
+               i.id as import_id,
+               i.file_name,
+               i.file_path,
+               i.group_name,
+               t.id as table_id,
+               t.table_name,
+               t.table_code,
+               t.table_comment,
+               cast(null as varchar(255)) as column_id_in_pdm,
+               cast(null as varchar(255)) as column_name,
+               cast(null as varchar(255)) as column_code
+        from pdm_table t
+        join import_file i on i.id = t.import_file_id
+        where t.import_file_id in ($placeholders)
+        """.trimIndent()
+
+    private fun java.sql.ResultSet.toTableNavigationItem(): TableNavigationItem =
+        TableNavigationItem(
+            type = if (getString("match_type") == "COLUMN") {
+                NavigationItemType.COLUMN_MATCH
+            } else {
+                NavigationItemType.TABLE
+            },
+            importId = getLong("import_id"),
+            importFileName = getString("file_name"),
+            importFilePath = getString("file_path"),
+            importGroupName = normalizedGroupName(),
+            tableId = getLong("table_id"),
+            tableName = getString("table_name"),
+            tableCode = getString("table_code"),
+            tableComment = getString("table_comment"),
+            matchedColumnIdInPdm = getString("column_id_in_pdm"),
+            matchedColumnName = getString("column_name"),
+            matchedColumnCode = getString("column_code"),
+        )
 
     fun findTableDetails(tableId: Long): PdmTableDetails? =
         databaseFactory.openConnection().use { connection ->
@@ -676,4 +861,11 @@ class PdmRepository(
                 ?.toString()
                 ?.takeIf { it.isNotBlank() }
         }.getOrNull() ?: "未分组"
+
+    private data class SearchNavigationQuery(
+        val sql: String,
+        val likeKeyword: String,
+        val importIds: List<Long>,
+        val tableId: Long?,
+    )
 }
