@@ -7,18 +7,20 @@ import indi.nonoas.pdmreader.model.PdmTableViewData
 import indi.nonoas.pdmreader.model.TableNavigationItem
 import indi.nonoas.pdmreader.service.PdmCatalogService
 import javafx.application.Platform
+import javafx.beans.binding.Bindings
 import javafx.beans.property.ReadOnlyBooleanProperty
 import javafx.beans.property.SimpleBooleanProperty
 import javafx.beans.property.SimpleStringProperty
 import javafx.collections.FXCollections
 import javafx.collections.ObservableList
+import javafx.geometry.Insets
+import javafx.geometry.Pos
 import javafx.scene.Node
 import javafx.scene.control.*
 import javafx.scene.input.Clipboard
 import javafx.scene.input.ClipboardContent
 import javafx.scene.input.MouseButton
-import javafx.scene.layout.Priority
-import javafx.scene.layout.VBox
+import javafx.scene.layout.*
 import org.slf4j.LoggerFactory
 
 class TableDetailTab(
@@ -32,6 +34,7 @@ class TableDetailTab(
     val tableId: Long = item.tableId
     val importId: Long = item.importId
 
+    private val allColumns: ObservableList<PdmColumnDetail> = FXCollections.observableArrayList()
     private val columns: ObservableList<PdmColumnDetail> = FXCollections.observableArrayList()
     private val ddlText = SimpleStringProperty("")
     val hasDdlProperty: ReadOnlyBooleanProperty = SimpleBooleanProperty(false).apply {
@@ -42,6 +45,7 @@ class TableDetailTab(
     private val metaText = SimpleStringProperty("")
     private val commentText = SimpleStringProperty("")
     private val highlightedColumnId = SimpleStringProperty("")
+    private val columnFilterText = SimpleStringProperty("")
     private var columnsTable: TableView<PdmColumnDetail>? = null
     private var detailTabs: TabPane? = null
 
@@ -112,6 +116,9 @@ class TableDetailTab(
             return
         }
 
+        if (columns.none { it.idInPdm == columnIdInPdm } && allColumns.any { it.idInPdm == columnIdInPdm }) {
+            columnFilterText.set("")
+        }
         highlightedColumnId.set(columnIdInPdm)
         selectHighlightedColumn(columnIdInPdm)
     }
@@ -156,16 +163,56 @@ class TableDetailTab(
         }
         this.detailTabs = detailTabs
 
-        return VBox(8.0, headerBox, detailTabs).apply {
+        val detailTabLayer = StackPane(detailTabs, createColumnFilterBox(detailTabs)).apply {
+            VBox.setVgrow(this, Priority.ALWAYS)
+        }
+
+        return VBox(8.0, headerBox, detailTabLayer).apply {
             isFillWidth = true
             VBox.setVgrow(this, Priority.ALWAYS)
         }
     }
 
+    private fun createColumnFilterBox(detailTabs: TabPane): HBox {
+        val filterField = TextField().apply {
+            promptText = "过滤字段名、编码或说明"
+            textProperty().bindBidirectional(columnFilterText)
+            styleClass.addAll("search-input", "column-filter-input")
+        }
+        columnFilterText.addListener { _, _, _ ->
+            applyColumnFilter()
+        }
+
+        return HBox(filterField).apply {
+            alignment = Pos.CENTER_RIGHT
+            maxWidth = Region.USE_PREF_SIZE
+            maxHeight = Region.USE_PREF_SIZE
+            styleClass.add("column-filter-bar")
+            StackPane.setAlignment(this, Pos.TOP_RIGHT)
+            StackPane.setMargin(this, Insets(4.0, 8.0, 0.0, 0.0))
+            visibleProperty().bind(detailTabs.selectionModel.selectedIndexProperty().isEqualTo(0))
+            managedProperty().bind(visibleProperty())
+        }
+    }
+
     private fun createColumnsTable(): TableView<PdmColumnDetail> {
+        val placeholderLabel = Label().apply {
+            textProperty().bind(
+                Bindings.createStringBinding(
+                    {
+                        if (columnFilterText.get().isBlank()) {
+                            "选择表后显示字段列表"
+                        } else {
+                            "没有匹配的字段"
+                        }
+                    },
+                    columnFilterText,
+                )
+            )
+        }
         val table = TableView(columns).apply {
             columnResizePolicy = TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN
-            placeholder = Label("选择表后显示字段列表")
+            placeholder = placeholderLabel
             styleClass.add("data-table")
         }
         columnsTable = table
@@ -252,6 +299,39 @@ class TableDetailTab(
         }
     }
 
+    private fun applyColumnFilter() {
+        val keyword = columnFilterText.get().trim()
+        val filteredColumns = if (keyword.isBlank()) {
+            allColumns
+        } else {
+            allColumns.filter { column -> column.matchesKeyword(keyword) }
+        }
+        columns.setAll(filteredColumns)
+
+        val highlightedColumnId = highlightedColumnId.get()
+        if (highlightedColumnId.isNotBlank() && columns.any { it.idInPdm == highlightedColumnId }) {
+            selectHighlightedColumn(highlightedColumnId)
+        }
+    }
+
+    private fun PdmColumnDetail.matchesKeyword(keyword: String): Boolean {
+        val normalizedKeyword = keyword.normalizeSearchText()
+        return listOf(
+            ordinalPosition.toString(),
+            name,
+            code.orEmpty(),
+            dataType.orEmpty(),
+            defaultValue.orEmpty(),
+            comment.orEmpty(),
+        ).any { value ->
+            value.lowercase().contains(keyword.lowercase()) ||
+                value.normalizeSearchText().contains(normalizedKeyword)
+        }
+    }
+
+    private fun String.normalizeSearchText(): String =
+        lowercase().filterNot { it.isWhitespace() || it == '_' || it == '-' }
+
     private fun formatRowValues(item: PdmColumnDetail): String = listOf(
         item.ordinalPosition.toString(),
         item.name,
@@ -291,7 +371,8 @@ class TableDetailTab(
 
     private fun applyData(data: PdmTableViewData, highlightColumnId: String?) {
         val details = data.details
-        columns.setAll(details.columns)
+        allColumns.setAll(details.columns)
+        applyColumnFilter()
         ddlText.set(data.ddl)
         titleText.set(
             details.tableCode?.takeIf { it.isNotBlank() }?.let { "${details.tableName} / $it" }

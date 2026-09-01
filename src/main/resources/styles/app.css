@@ -394,6 +394,14 @@
     -fx-text-fill: -app-text-muted;
 }
 
+.column-filter-bar {
+    -fx-padding: 0;
+}
+
+.column-filter-input {
+    -fx-pref-width: 310px;
+}
+
 .table-row-cell {
     -fx-border-width: 0 0 1 0;
 }
